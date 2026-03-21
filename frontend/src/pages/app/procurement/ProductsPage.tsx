@@ -3,7 +3,7 @@ import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
-import { productsApi, goodsGroupsApi, type Product } from '../../../api/procurement';
+import { productsApi, goodsGroupsApi, suppliersApi, type Product } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
 import { Pagination } from '../../../components/Pagination';
 
@@ -12,6 +12,7 @@ export default function ProductsPage() {
   const { activeTenant } = useTenant();
   const enabled = !!activeTenant;
   const [search, setSearch] = useState('');
+  const [supplierFilter, setSupplierFilter] = useState('');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useLocalStorage<number>('table_page_size', 25);
   const [showForm, setShowForm] = useState(false);
@@ -19,8 +20,8 @@ export default function ProductsPage() {
   const [form, setForm] = useState<Partial<Product>>({ nameShort: '', nameLong: '', ean: '', wtn: '' });
 
   const { data, isLoading } = useQuery({
-    queryKey: ['products', search, page, limit],
-    queryFn: () => productsApi.list(search || undefined, page, limit),
+    queryKey: ['products', search, page, limit, supplierFilter],
+    queryFn: () => productsApi.list(search || undefined, page, limit, supplierFilter || undefined),
     enabled,
     throwOnError: false,
     placeholderData: prev => prev,
@@ -30,11 +31,14 @@ export default function ProductsPage() {
   const total = data?.total ?? 0;
   const pages = data?.pages ?? 1;
 
-  // Reset to page 1 on new search
+  // Reset to page 1 on new search/filter
   const handleSearch = (q: string) => { setSearch(q); setPage(1); };
+  const handleSupplierFilter = (id: string) => { setSupplierFilter(id); setPage(1); };
 
   const { data: goodsGroupsData } = useQuery({ queryKey: ['goods-groups', 1, 500], queryFn: () => goodsGroupsApi.list(1, 500), enabled, throwOnError: false });
   const goodsGroups = goodsGroupsData?.items ?? [];
+  const { data: suppliersData } = useQuery({ queryKey: ['suppliers', 1, 500], queryFn: () => suppliersApi.list(1, 500), enabled, throwOnError: false });
+  const suppliers = suppliersData?.items ?? [];
 
   const createMutation = useMutation({
     mutationFn: productsApi.create,
@@ -77,15 +81,25 @@ export default function ProductsPage() {
         </button>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
-        <input
-          type="text"
-          placeholder="Name, Eigenname oder EAN suchen..."
-          value={search}
-          onChange={e => handleSearch(e.target.value)}
-          className="w-full pl-10 pr-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white placeholder-dark-400 focus:outline-none focus:border-primary-500"
-        />
+      <div className="flex gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
+          <input
+            type="text"
+            placeholder="Name, Eigenname oder EAN suchen..."
+            value={search}
+            onChange={e => handleSearch(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white placeholder-dark-400 focus:outline-none focus:border-primary-500"
+          />
+        </div>
+        <select
+          value={supplierFilter}
+          onChange={e => handleSupplierFilter(e.target.value)}
+          className="px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm text-white focus:outline-none focus:border-primary-500"
+        >
+          <option value="">Alle Lieferanten</option>
+          {suppliers.map(s => <option key={s.id} value={s.id}>{s.company || `${s.firstname} ${s.lastname}`.trim()}</option>)}
+        </select>
       </div>
 
       {showForm && (

@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { ShoppingCart, Package, Users, Ship, Anchor, Box, Globe, Tag, Gift } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { ordersApi, productsApi, suppliersApi } from '../../../api/procurement';
+import { ordersApi, productsApi, suppliersApi, freightCarriersApi, harboursApi, containersApi, countriesApi, goodsGroupsApi, offersApi } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
 
 export default function ProcurementPage() {
@@ -10,6 +10,12 @@ export default function ProcurementPage() {
   const { data: ordersData } = useQuery({ queryKey: ['orders', 1, 25], queryFn: () => ordersApi.list(), enabled, throwOnError: false });
   const { data: productsData } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list(), enabled, throwOnError: false });
   const { data: suppliersData } = useQuery({ queryKey: ['suppliers', 1, 25], queryFn: () => suppliersApi.list(), enabled, throwOnError: false });
+  const { data: freightCarriersData } = useQuery({ queryKey: ['freight-carriers', 1, 1], queryFn: () => freightCarriersApi.list(1, 1), enabled, throwOnError: false });
+  const { data: harboursData } = useQuery({ queryKey: ['harbours', 1, 1], queryFn: () => harboursApi.list(1, 1), enabled, throwOnError: false });
+  const { data: containersData } = useQuery({ queryKey: ['containers', 1, 1], queryFn: () => containersApi.list(1, 1), enabled, throwOnError: false });
+  const { data: countriesData } = useQuery({ queryKey: ['countries', 1, 1], queryFn: () => countriesApi.list(1, 1), enabled, throwOnError: false });
+  const { data: goodsGroupsData } = useQuery({ queryKey: ['goods-groups', 1, 1], queryFn: () => goodsGroupsApi.list(1, 1), enabled, throwOnError: false });
+  const { data: offersData } = useQuery({ queryKey: ['offers', 1, 1], queryFn: () => offersApi.list(undefined, 1, 1), enabled, throwOnError: false });
 
   const tiles = [
     {
@@ -39,7 +45,7 @@ export default function ProcurementPage() {
     {
       icon: Ship,
       label: 'Frachtführer',
-      count: null,
+      count: freightCarriersData?.total ?? null,
       to: '/procurement/freight-carriers',
       color: 'text-amber-400',
       bg: 'bg-amber-500/20',
@@ -47,7 +53,7 @@ export default function ProcurementPage() {
     {
       icon: Anchor,
       label: 'Häfen',
-      count: null,
+      count: harboursData?.total ?? null,
       to: '/procurement/harbours',
       color: 'text-teal-400',
       bg: 'bg-teal-500/20',
@@ -55,7 +61,7 @@ export default function ProcurementPage() {
     {
       icon: Box,
       label: 'Container',
-      count: null,
+      count: containersData?.total ?? null,
       to: '/procurement/containers',
       color: 'text-orange-400',
       bg: 'bg-orange-500/20',
@@ -63,7 +69,7 @@ export default function ProcurementPage() {
     {
       icon: Globe,
       label: 'Länder',
-      count: null,
+      count: countriesData?.total ?? null,
       to: '/procurement/countries',
       color: 'text-green-400',
       bg: 'bg-green-500/20',
@@ -71,7 +77,7 @@ export default function ProcurementPage() {
     {
       icon: Tag,
       label: 'Warengruppen',
-      count: null,
+      count: goodsGroupsData?.total ?? null,
       to: '/procurement/goods-groups',
       color: 'text-pink-400',
       bg: 'bg-pink-500/20',
@@ -79,7 +85,7 @@ export default function ProcurementPage() {
     {
       icon: Gift,
       label: 'Angebote',
-      count: null,
+      count: offersData?.total ?? null,
       to: '/procurement/offers',
       color: 'text-indigo-400',
       bg: 'bg-indigo-500/20',

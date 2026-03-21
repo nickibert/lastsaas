@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Save, Plus, Trash2, Check, X, Calculator } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, Check, X, Calculator, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   ordersApi, suppliersApi, productsApi, containersApi, harboursApi, freightCarriersApi,
@@ -119,6 +119,7 @@ export default function OrderDetailPage() {
   // Payments
   const [newPayment, setNewPayment] = useState<Partial<OrderPayment>>({ nr: 0, paymentAmountEur: 0, paymentDollarRate: 0, paymentFees: 0 });
   const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [editingPayment, setEditingPayment] = useState<OrderPayment | null>(null);
   const createPaymentMutation = useMutation({
     mutationFn: (data: Partial<OrderPayment>) => {
       const payload = { ...data };
@@ -126,6 +127,15 @@ export default function OrderDetailPage() {
       return ordersApi.createPayment(id!, payload);
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['order-payments', id] }); setShowPaymentForm(false); setNewPayment({ nr: 0, paymentAmountEur: 0, paymentDollarRate: 0, paymentFees: 0 }); toast.success('Zahlung angelegt'); },
+    onError: () => toast.error('Fehler'),
+  });
+  const updatePaymentMutation = useMutation({
+    mutationFn: (data: OrderPayment) => {
+      const payload = { ...data };
+      if (payload.paymentDate && !payload.paymentDate.includes('T')) payload.paymentDate = payload.paymentDate + 'T00:00:00Z';
+      return ordersApi.updatePayment(id!, data.id, payload);
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['order-payments', id] }); setEditingPayment(null); toast.success('Zahlung gespeichert'); },
     onError: () => toast.error('Fehler'),
   });
   const deletePaymentMutation = useMutation({
@@ -573,15 +583,48 @@ export default function OrderDetailPage() {
             <p className="text-dark-500 text-sm">Keine Zahlungen</p>
           )}
           {payments.map(p => (
-            <div key={p.id} className="flex items-center gap-4 px-3 py-2 bg-dark-800/50 rounded-lg text-sm">
-              <span className="text-dark-400 w-20">{p.nr === 0 ? 'Anzahlung' : `Zahlung ${p.nr}`}</span>
-              <span className="text-white font-mono w-28 text-right">{p.paymentAmountEur.toLocaleString('de-DE', { minimumFractionDigits: 2 })} EUR</span>
-              {p.paymentDate && <span className="text-dark-400">{new Date(p.paymentDate).toLocaleDateString('de-DE')}</span>}
-              <span className="text-dark-400">Kurs: {p.paymentDollarRate}</span>
-              <span className="text-dark-400">Gebühren: {p.paymentFees}</span>
-              <button onClick={() => { if (confirm('Zahlung löschen?')) deletePaymentMutation.mutate(p.id); }}
-                className="ml-auto p-1 text-dark-500 hover:text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
-            </div>
+            editingPayment?.id === p.id ? (
+              <div key={p.id} className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 bg-dark-800/30 rounded-lg">
+                <div>
+                  <label className={labelCls}>Typ</label>
+                  <select value={editingPayment.nr ?? 0} onChange={e => setEditingPayment(ep => ep && ({ ...ep, nr: parseInt(e.target.value) }))} className={inputCls}>
+                    <option value={0}>Anzahlung</option>
+                    <option value={1}>Restzahlung</option>
+                    <option value={2}>Zahlung 2</option>
+                  </select>
+                </div>
+                <NumInput label="Betrag EUR" value={editingPayment.paymentAmountEur ?? 0} onChange={v => setEditingPayment(ep => ep && ({ ...ep, paymentAmountEur: v }))} />
+                <div>
+                  <label className={labelCls}>Datum</label>
+                  <input type="date" value={editingPayment.paymentDate?.slice(0, 10) ?? ''}
+                    onChange={e => setEditingPayment(ep => ep && ({ ...ep, paymentDate: e.target.value }))} className={inputCls} />
+                </div>
+                <NumInput label="Dollarkurs" value={editingPayment.paymentDollarRate ?? 0} onChange={v => setEditingPayment(ep => ep && ({ ...ep, paymentDollarRate: v }))} />
+                <NumInput label="Bankgebühren" value={editingPayment.paymentFees ?? 0} onChange={v => setEditingPayment(ep => ep && ({ ...ep, paymentFees: v }))} />
+                <div className="flex items-end gap-2 col-span-2">
+                  <button onClick={() => updatePaymentMutation.mutate(editingPayment)}
+                    disabled={updatePaymentMutation.isPending}
+                    className="px-3 py-2 bg-primary-500 text-white rounded-lg text-sm hover:bg-primary-600 disabled:opacity-50">
+                    Speichern
+                  </button>
+                  <button onClick={() => setEditingPayment(null)}
+                    className="px-3 py-2 bg-dark-700 text-white rounded-lg text-sm hover:bg-dark-600">Abbrechen</button>
+                </div>
+              </div>
+            ) : (
+              <div key={p.id} className="flex items-center gap-4 px-3 py-2 bg-dark-800/50 rounded-lg text-sm">
+                <span className="text-dark-400 w-20">{p.nr === 0 ? 'Anzahlung' : `Zahlung ${p.nr}`}</span>
+                <span className="text-white font-mono w-28 text-right">{p.paymentAmountEur.toLocaleString('de-DE', { minimumFractionDigits: 2 })} EUR</span>
+                {p.paymentDate && <span className="text-dark-400">{new Date(p.paymentDate).toLocaleDateString('de-DE')}</span>}
+                <span className="text-dark-400">Kurs: {p.paymentDollarRate}</span>
+                <span className="text-dark-400">Gebühren: {p.paymentFees}</span>
+                <div className="ml-auto flex items-center gap-1">
+                  <button onClick={() => setEditingPayment(p)} className="p-1 text-dark-500 hover:text-primary-400"><Pencil className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => { if (confirm('Zahlung löschen?')) deletePaymentMutation.mutate(p.id); }}
+                    className="p-1 text-dark-500 hover:text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
+              </div>
+            )
           ))}
           {showPaymentForm && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 bg-dark-800/30 rounded-lg">
