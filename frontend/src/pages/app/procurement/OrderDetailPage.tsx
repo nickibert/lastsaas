@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Save, Plus, Trash2, Check, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  ordersApi, suppliersApi, productsApi, containersApi, harboursApi, freightCarriersApi,
+  ordersApi, suppliersApi, containersApi, harboursApi, freightCarriersApi,
   type Order, type OrderProduct, type OrderFreight, type OrderTask, type OrderPayment, type Product,
 } from '../../../api/procurement';
 import { ProductSearch } from '../../../components/ProductSearch';
