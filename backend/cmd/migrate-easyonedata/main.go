@@ -232,6 +232,25 @@ func (im *IDMap) get(table, legacyID string) primitive.ObjectID {
 // Conversion helpers
 // ---------------------------------------------------------------------------
 
+// coalesce returns the first non-empty string from the arguments.
+func coalesce(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// truncate cuts s to at most n runes (MongoDB schema maxLength).
+func truncate(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n])
+}
+
 func parseFloat(s string) float64 {
 	if s == "" {
 		return 0
@@ -414,13 +433,13 @@ func importData(ctx context.Context, db *mongo.Database, tenantID primitive.Obje
 			d := doc{
 				"_id":          idMap.get("product", r["products_id"]),
 				"tenantId":     tenantID,
-				"nameShort":    r["name_short"],
-				"ownNameShort": r["own_name_short"],
+				"nameShort":    truncate(coalesce(r["name_short"], r["own_name_short"], r["name_long"], "?"), 45),
+				"ownNameShort": truncate(r["own_name_short"], 45),
 				"nameLong":     r["name_long"],
 				"description":  r["description"],
 				"misc":         r["misc"],
-				"wtn":          r["wtn"],
-				"ean":          r["ean"],
+				"wtn":          truncate(r["wtn"], 30),
+				"ean":          truncate(r["ean"], 32),
 				"aco":          r["aco"],
 				"widthMm":      parseInt(r["width"]),
 				"heightMm":     parseInt(r["height"]),
