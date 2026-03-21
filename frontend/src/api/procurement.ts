@@ -207,9 +207,16 @@ export const goodsGroupsApi = {
   delete: (id: string) => api.delete(`${BASE}/goods-groups/${id}`),
 };
 
+export interface ProductsPage {
+  items: Product[];
+  total: number;
+  page: number;
+  pages: number;
+}
+
 // Products
 export const productsApi = {
-  list: (q?: string) => api.get<Product[]>(`${BASE}/products`, { params: { q } }).then(r => r.data),
+  list: (q?: string, page = 1) => api.get<ProductsPage>(`${BASE}/products`, { params: { q, page } }).then(r => r.data),
   create: (data: Partial<Product>) => api.post<Product>(`${BASE}/products`, data).then(r => r.data),
   get: (id: string) => api.get<Product>(`${BASE}/products/${id}`).then(r => r.data),
   update: (id: string, data: Partial<Product>) => api.put(`${BASE}/products/${id}`, data),

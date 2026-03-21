@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"lastsaas/internal/db"
@@ -440,18 +441,34 @@ func (h *ProcurementHandler) listProducts(w http.ResponseWriter, r *http.Request
 	if q := r.URL.Query().Get("q"); q != "" {
 		filter["$or"] = bson.A{
 			bson.M{"nameShort": bson.M{"$regex": q, "$options": "i"}},
+			bson.M{"ownNameShort": bson.M{"$regex": q, "$options": "i"}},
 			bson.M{"nameLong": bson.M{"$regex": q, "$options": "i"}},
 			bson.M{"ean": bson.M{"$regex": q, "$options": "i"}},
 		}
 	}
-	cursor, err := h.db.Products().Find(r.Context(), filter, options.Find().SetSort(bson.D{{Key: "nameShort", Value: 1}}).SetLimit(10000))
+	const pageSize int64 = 50
+	page := int64(1)
+	if p, err := strconv.ParseInt(r.URL.Query().Get("page"), 10, 64); err == nil && p > 0 {
+		page = p
+	}
+	total, _ := h.db.Products().CountDocuments(r.Context(), filter)
+	cursor, err := h.db.Products().Find(r.Context(), filter,
+		options.Find().
+			SetSort(bson.D{{Key: "nameShort", Value: 1}}).
+			SetSkip((page-1)*pageSize).
+			SetLimit(pageSize))
 	if err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
-	results := make([]models.Product, 0)
-	cursor.All(r.Context(), &results) //nolint
-	writeJSON(w, http.StatusOK, results)
+	items := make([]models.Product, 0)
+	cursor.All(r.Context(), &items) //nolint
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": items,
+		"total": total,
+		"page":  page,
+		"pages": (total + pageSize - 1) / pageSize,
+	})
 }
 
 func (h *ProcurementHandler) createProduct(w http.ResponseWriter, r *http.Request) {
