@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Trash2, Pencil, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Search, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { productsApi, goodsGroupsApi, type Product } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
+import { Pagination } from '../../../components/Pagination';
 
 export default function ProductsPage() {
   const qc = useQueryClient();
@@ -30,7 +31,8 @@ export default function ProductsPage() {
   // Reset to page 1 on new search
   const handleSearch = (q: string) => { setSearch(q); setPage(1); };
 
-  const { data: goodsGroups = [] } = useQuery({ queryKey: ['goods-groups'], queryFn: goodsGroupsApi.list, enabled, throwOnError: false });
+  const { data: goodsGroupsData } = useQuery({ queryKey: ['goods-groups', 1, 500], queryFn: () => goodsGroupsApi.list(1, 500), enabled, throwOnError: false });
+  const goodsGroups = goodsGroupsData?.items ?? [];
 
   const createMutation = useMutation({
     mutationFn: productsApi.create,
@@ -186,47 +188,7 @@ export default function ProductsPage() {
             </tbody>
           </table>
 
-          {/* Pagination */}
-          {pages > 1 && (
-            <div className="flex items-center justify-between px-4 py-3 border-t border-dark-800">
-              <span className="text-sm text-dark-400">
-                Seite {page} von {pages} ({total.toLocaleString('de-DE')} Einträge)
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                  className="p-1.5 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700 disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                {/* Page number buttons — show up to 7 around current page */}
-                {Array.from({ length: Math.min(7, pages) }, (_, i) => {
-                  const start = Math.max(1, Math.min(page - 3, pages - 6));
-                  return start + i;
-                }).map(p => (
-                  <button
-                    key={p}
-                    onClick={() => setPage(p)}
-                    className={`w-8 h-8 rounded-lg text-sm transition-colors ${
-                      p === page
-                        ? 'bg-primary-500 text-white'
-                        : 'text-dark-400 hover:text-white hover:bg-dark-700'
-                    }`}
-                  >
-                    {p}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setPage(p => Math.min(pages, p + 1))}
-                  disabled={page === pages}
-                  className="p-1.5 rounded-lg text-dark-400 hover:text-white hover:bg-dark-700 disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          )}
+          <Pagination page={page} pages={pages} total={total} limit={50} onPage={setPage} onLimit={() => {}} />
         </div>
       )}
     </div>

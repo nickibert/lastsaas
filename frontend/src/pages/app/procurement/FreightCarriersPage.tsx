@@ -4,6 +4,7 @@ import { Plus, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { freightCarriersApi, type FreightCarrier } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
+import { Pagination } from '../../../components/Pagination';
 
 export default function FreightCarriersPage() {
   const qc = useQueryClient();
@@ -12,13 +13,20 @@ export default function FreightCarriersPage() {
   const [editing, setEditing] = useState<FreightCarrier | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Partial<FreightCarrier>>({ name: '', description: '' });
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
 
-  const { data: carriers = [], isLoading } = useQuery({
-    queryKey: ['freight-carriers'],
-    queryFn: freightCarriersApi.list,
+  const { data, isLoading } = useQuery({
+    queryKey: ['freight-carriers', page, limit],
+    queryFn: () => freightCarriersApi.list(page, limit),
     enabled,
     throwOnError: false,
+    placeholderData: prev => prev,
   });
+
+  const carriers = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const pages = data?.pages ?? 1;
 
   const createMutation = useMutation({
     mutationFn: freightCarriersApi.create,
@@ -49,7 +57,7 @@ export default function FreightCarriersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Frachtführer</h1>
-          <p className="text-dark-400 mt-1">{carriers.length} Frachtführer</p>
+          <p className="text-dark-400 mt-1">{total.toLocaleString('de-DE')} Frachtführer</p>
         </div>
         <button
           onClick={() => { reset(); setEditing(null); setShowForm(true); }}
@@ -115,6 +123,7 @@ export default function FreightCarriersPage() {
               ))}
             </tbody>
           </table>
+          <Pagination page={page} pages={pages} total={total} limit={limit} onPage={setPage} onLimit={l => { setLimit(l); setPage(1); }} />
         </div>
       )}
     </div>

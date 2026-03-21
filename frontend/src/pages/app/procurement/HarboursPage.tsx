@@ -4,6 +4,7 @@ import { Plus, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { harboursApi, type Harbour } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
+import { Pagination } from '../../../components/Pagination';
 
 export default function HarboursPage() {
   const qc = useQueryClient();
@@ -12,13 +13,20 @@ export default function HarboursPage() {
   const [editing, setEditing] = useState<Harbour | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Partial<Harbour>>({ name: '', description: '' });
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
 
-  const { data: harbours = [], isLoading } = useQuery({
-    queryKey: ['harbours'],
-    queryFn: harboursApi.list,
+  const { data, isLoading } = useQuery({
+    queryKey: ['harbours', page, limit],
+    queryFn: () => harboursApi.list(page, limit),
     enabled,
     throwOnError: false,
+    placeholderData: prev => prev,
   });
+
+  const harbours = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const pages = data?.pages ?? 1;
 
   const createMutation = useMutation({
     mutationFn: harboursApi.create,
@@ -49,7 +57,7 @@ export default function HarboursPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Häfen</h1>
-          <p className="text-dark-400 mt-1">{harbours.length} Häfen</p>
+          <p className="text-dark-400 mt-1">{total.toLocaleString('de-DE')} Häfen</p>
         </div>
         <button
           onClick={() => { reset(); setEditing(null); setShowForm(true); }}
@@ -115,6 +123,7 @@ export default function HarboursPage() {
               ))}
             </tbody>
           </table>
+          <Pagination page={page} pages={pages} total={total} limit={limit} onPage={setPage} onLimit={l => { setLimit(l); setPage(1); }} />
         </div>
       )}
     </div>

@@ -7,15 +7,15 @@ import { useTenant } from '../../../contexts/TenantContext';
 export default function ProcurementPage() {
   const { activeTenant } = useTenant();
   const enabled = !!activeTenant;
-  const { data: orders = [] } = useQuery({ queryKey: ['orders'], queryFn: () => ordersApi.list(), enabled, throwOnError: false });
+  const { data: ordersData } = useQuery({ queryKey: ['orders', 1, 25], queryFn: () => ordersApi.list(), enabled, throwOnError: false });
   const { data: productsData } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list(), enabled, throwOnError: false });
-  const { data: suppliers = [] } = useQuery({ queryKey: ['suppliers'], queryFn: suppliersApi.list, enabled, throwOnError: false });
+  const { data: suppliersData } = useQuery({ queryKey: ['suppliers', 1, 25], queryFn: () => suppliersApi.list(), enabled, throwOnError: false });
 
   const tiles = [
     {
       icon: ShoppingCart,
       label: 'Bestellungen',
-      count: orders.length,
+      count: ordersData?.total ?? null,
       to: '/procurement/orders',
       color: 'text-primary-400',
       bg: 'bg-primary-500/20',
@@ -31,7 +31,7 @@ export default function ProcurementPage() {
     {
       icon: Users,
       label: 'Lieferanten',
-      count: suppliers.length,
+      count: suppliersData?.total ?? null,
       to: '/procurement/suppliers',
       color: 'text-accent-purple',
       bg: 'bg-accent-purple/20',

@@ -58,13 +58,17 @@ export default function OrderDetailPage() {
     throwOnError: false,
   });
 
-  const { data: suppliers = [] } = useQuery({ queryKey: ['suppliers'], queryFn: suppliersApi.list, enabled, throwOnError: false });
+  const { data: suppliersData } = useQuery({ queryKey: ['suppliers', 1, 500], queryFn: () => suppliersApi.list(1, 500), enabled, throwOnError: false });
+  const suppliers = suppliersData?.items ?? [];
   // productNames caches id→name for display in order product rows
   const [productNames, setProductNames] = useState<Record<string, string>>({});
   const setProductName = (id: string, p: Product) => setProductNames(prev => ({ ...prev, [id]: p.nameShort }));
-  const { data: containers = [] } = useQuery({ queryKey: ['containers'], queryFn: containersApi.list, enabled, throwOnError: false });
-  const { data: harbours = [] } = useQuery({ queryKey: ['harbours'], queryFn: harboursApi.list, enabled, throwOnError: false });
-  const { data: freightCarriers = [] } = useQuery({ queryKey: ['freight-carriers'], queryFn: freightCarriersApi.list, enabled, throwOnError: false });
+  const { data: containersData } = useQuery({ queryKey: ['containers', 1, 500], queryFn: () => containersApi.list(1, 500), enabled, throwOnError: false });
+  const containers = containersData?.items ?? [];
+  const { data: harboursData } = useQuery({ queryKey: ['harbours', 1, 500], queryFn: () => harboursApi.list(1, 500), enabled, throwOnError: false });
+  const harbours = harboursData?.items ?? [];
+  const { data: freightCarriersData } = useQuery({ queryKey: ['freight-carriers', 1, 500], queryFn: () => freightCarriersApi.list(1, 500), enabled, throwOnError: false });
+  const freightCarriers = freightCarriersData?.items ?? [];
   const { data: tasks = [] } = useQuery({ queryKey: ['order-tasks', id], queryFn: () => ordersApi.listTasks(id!), enabled, throwOnError: false });
   const { data: payments = [] } = useQuery({ queryKey: ['order-payments', id], queryFn: () => ordersApi.listPayments(id!), enabled, throwOnError: false });
 

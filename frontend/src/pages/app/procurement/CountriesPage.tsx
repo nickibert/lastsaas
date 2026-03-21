@@ -4,6 +4,7 @@ import { Plus, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { countriesApi, type Country } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
+import { Pagination } from '../../../components/Pagination';
 
 export default function CountriesPage() {
   const qc = useQueryClient();
@@ -12,13 +13,20 @@ export default function CountriesPage() {
   const [editing, setEditing] = useState<Country | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Partial<Country>>({ name: '' });
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
 
-  const { data: countries = [], isLoading } = useQuery({
-    queryKey: ['countries'],
-    queryFn: countriesApi.list,
+  const { data, isLoading } = useQuery({
+    queryKey: ['countries', page, limit],
+    queryFn: () => countriesApi.list(page, limit),
     enabled,
     throwOnError: false,
+    placeholderData: prev => prev,
   });
+
+  const countries = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const pages = data?.pages ?? 1;
 
   const createMutation = useMutation({
     mutationFn: countriesApi.create,
@@ -49,7 +57,7 @@ export default function CountriesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Länder</h1>
-          <p className="text-dark-400 mt-1">{countries.length} Länder</p>
+          <p className="text-dark-400 mt-1">{total.toLocaleString('de-DE')} Länder</p>
         </div>
         <button
           onClick={() => { reset(); setEditing(null); setShowForm(true); }}
@@ -106,6 +114,7 @@ export default function CountriesPage() {
               ))}
             </tbody>
           </table>
+          <Pagination page={page} pages={pages} total={total} limit={limit} onPage={setPage} onLimit={l => { setLimit(l); setPage(1); }} />
         </div>
       )}
     </div>

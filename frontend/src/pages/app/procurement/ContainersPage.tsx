@@ -4,6 +4,7 @@ import { Plus, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { containersApi, type Container } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
+import { Pagination } from '../../../components/Pagination';
 
 export default function ContainersPage() {
   const qc = useQueryClient();
@@ -12,13 +13,20 @@ export default function ContainersPage() {
   const [editing, setEditing] = useState<Container | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Partial<Container>>({ name: '', description: '', volumeM3: 0, heightM: 0, lengthM: 0, widthM: 0 });
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
 
-  const { data: containers = [], isLoading } = useQuery({
-    queryKey: ['containers'],
-    queryFn: containersApi.list,
+  const { data, isLoading } = useQuery({
+    queryKey: ['containers', page, limit],
+    queryFn: () => containersApi.list(page, limit),
     enabled,
     throwOnError: false,
+    placeholderData: prev => prev,
   });
+
+  const containers = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const pages = data?.pages ?? 1;
 
   const createMutation = useMutation({
     mutationFn: containersApi.create,
@@ -58,7 +66,7 @@ export default function ContainersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Container</h1>
-          <p className="text-dark-400 mt-1">{containers.length} Container</p>
+          <p className="text-dark-400 mt-1">{total.toLocaleString('de-DE')} Container</p>
         </div>
         <button
           onClick={() => { reset(); setEditing(null); setShowForm(true); }}
@@ -130,6 +138,7 @@ export default function ContainersPage() {
               ))}
             </tbody>
           </table>
+          <Pagination page={page} pages={pages} total={total} limit={limit} onPage={setPage} onLimit={l => { setLimit(l); setPage(1); }} />
         </div>
       )}
     </div>

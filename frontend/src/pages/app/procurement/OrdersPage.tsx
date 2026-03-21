@@ -5,6 +5,7 @@ import { Plus, Search, Trash2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { ordersApi, suppliersApi, type Order } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
+import { Pagination } from '../../../components/Pagination';
 
 export default function OrdersPage() {
   const qc = useQueryClient();
@@ -12,6 +13,8 @@ export default function OrdersPage() {
   const { activeTenant } = useTenant();
   const enabled = !!activeTenant;
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Partial<Order>>({
     orderNumber: '',
@@ -20,19 +23,26 @@ export default function OrdersPage() {
     orderSumUsd: 0,
   });
 
-  const { data: orders = [], isLoading } = useQuery({
-    queryKey: ['orders', search],
-    queryFn: () => ordersApi.list(search || undefined),
+  const { data, isLoading } = useQuery({
+    queryKey: ['orders', search, page, limit],
+    queryFn: () => ordersApi.list(search || undefined, page, limit),
+    enabled,
+    throwOnError: false,
+    placeholderData: prev => prev,
+  });
+
+  const orders = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const pages = data?.pages ?? 1;
+
+  const { data: suppliersData } = useQuery({
+    queryKey: ['suppliers', 1, 500],
+    queryFn: () => suppliersApi.list(1, 500),
     enabled,
     throwOnError: false,
   });
 
-  const { data: suppliers = [] } = useQuery({
-    queryKey: ['suppliers'],
-    queryFn: suppliersApi.list,
-    enabled,
-    throwOnError: false,
-  });
+  const suppliers = suppliersData?.items ?? [];
 
   const createMutation = useMutation({
     mutationFn: (data: Partial<Order>) => ordersApi.create(data),
@@ -63,7 +73,7 @@ export default function OrdersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Bestellungen</h1>
-          <p className="text-dark-400 mt-1">{orders.length} Bestellungen</p>
+          <p className="text-dark-400 mt-1">{total.toLocaleString('de-DE')} Bestellungen</p>
         </div>
         <button
           onClick={() => setShowForm(true)}
@@ -81,7 +91,7 @@ export default function OrdersPage() {
           type="text"
           placeholder="Bestellnummer oder Inhalt suchen..."
           value={search}
-          onChange={e => setSearch(e.target.value)}
+          onChange={e => { setSearch(e.target.value); setPage(1); }}
           className="w-full pl-10 pr-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white placeholder-dark-400 focus:outline-none focus:border-primary-500"
         />
       </div>
@@ -218,6 +228,7 @@ export default function OrdersPage() {
               )}
             </tbody>
           </table>
+          <Pagination page={page} pages={pages} total={total} limit={limit} onPage={setPage} onLimit={l => { setLimit(l); setPage(1); }} />
         </div>
       )}
     </div>

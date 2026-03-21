@@ -184,7 +184,7 @@ const BASE = '/procurement';
 
 // Suppliers
 export const suppliersApi = {
-  list: () => api.get<Supplier[]>(`${BASE}/suppliers`).then(r => r.data),
+  list: (page = 1, limit = 25) => api.get<PagedResult<Supplier>>(`${BASE}/suppliers`, { params: { page, limit } }).then(r => r.data),
   create: (data: Partial<Supplier>) => api.post<Supplier>(`${BASE}/suppliers`, data).then(r => r.data),
   get: (id: string) => api.get<Supplier>(`${BASE}/suppliers/${id}`).then(r => r.data),
   update: (id: string, data: Partial<Supplier>) => api.put(`${BASE}/suppliers/${id}`, data),
@@ -201,11 +201,18 @@ export const supplierCodesApi = {
 
 // Goods groups
 export const goodsGroupsApi = {
-  list: () => api.get<GoodsGroup[]>(`${BASE}/goods-groups`).then(r => r.data),
+  list: (page = 1, limit = 25) => api.get<PagedResult<GoodsGroup>>(`${BASE}/goods-groups`, { params: { page, limit } }).then(r => r.data),
   create: (data: Partial<GoodsGroup>) => api.post<GoodsGroup>(`${BASE}/goods-groups`, data).then(r => r.data),
   update: (id: string, data: Partial<GoodsGroup>) => api.put(`${BASE}/goods-groups/${id}`, data),
   delete: (id: string) => api.delete(`${BASE}/goods-groups/${id}`),
 };
+
+export interface PagedResult<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pages: number;
+}
 
 export interface ProductsPage {
   items: Product[];
@@ -225,7 +232,7 @@ export const productsApi = {
 
 // Freight carriers
 export const freightCarriersApi = {
-  list: () => api.get<FreightCarrier[]>(`${BASE}/freight-carriers`).then(r => r.data),
+  list: (page = 1, limit = 25) => api.get<PagedResult<FreightCarrier>>(`${BASE}/freight-carriers`, { params: { page, limit } }).then(r => r.data),
   create: (data: Partial<FreightCarrier>) => api.post<FreightCarrier>(`${BASE}/freight-carriers`, data).then(r => r.data),
   update: (id: string, data: Partial<FreightCarrier>) => api.put(`${BASE}/freight-carriers/${id}`, data),
   delete: (id: string) => api.delete(`${BASE}/freight-carriers/${id}`),
@@ -233,7 +240,7 @@ export const freightCarriersApi = {
 
 // Harbours
 export const harboursApi = {
-  list: () => api.get<Harbour[]>(`${BASE}/harbours`).then(r => r.data),
+  list: (page = 1, limit = 25) => api.get<PagedResult<Harbour>>(`${BASE}/harbours`, { params: { page, limit } }).then(r => r.data),
   create: (data: Partial<Harbour>) => api.post<Harbour>(`${BASE}/harbours`, data).then(r => r.data),
   update: (id: string, data: Partial<Harbour>) => api.put(`${BASE}/harbours/${id}`, data),
   delete: (id: string) => api.delete(`${BASE}/harbours/${id}`),
@@ -241,7 +248,7 @@ export const harboursApi = {
 
 // Containers
 export const containersApi = {
-  list: () => api.get<Container[]>(`${BASE}/containers`).then(r => r.data),
+  list: (page = 1, limit = 25) => api.get<PagedResult<Container>>(`${BASE}/containers`, { params: { page, limit } }).then(r => r.data),
   create: (data: Partial<Container>) => api.post<Container>(`${BASE}/containers`, data).then(r => r.data),
   update: (id: string, data: Partial<Container>) => api.put(`${BASE}/containers/${id}`, data),
   delete: (id: string) => api.delete(`${BASE}/containers/${id}`),
@@ -249,7 +256,7 @@ export const containersApi = {
 
 // Countries
 export const countriesApi = {
-  list: () => api.get<Country[]>(`${BASE}/countries`).then(r => r.data),
+  list: (page = 1, limit = 25) => api.get<PagedResult<Country>>(`${BASE}/countries`, { params: { page, limit } }).then(r => r.data),
   create: (data: Partial<Country>) => api.post<Country>(`${BASE}/countries`, data).then(r => r.data),
   update: (id: string, data: Partial<Country>) => api.put(`${BASE}/countries/${id}`, data),
   delete: (id: string) => api.delete(`${BASE}/countries/${id}`),
@@ -257,7 +264,7 @@ export const countriesApi = {
 
 // Orders
 export const ordersApi = {
-  list: (q?: string) => api.get<Order[]>(`${BASE}/orders`, { params: { q } }).then(r => r.data),
+  list: (q?: string, page = 1, limit = 25) => api.get<PagedResult<Order>>(`${BASE}/orders`, { params: { q, page, limit } }).then(r => r.data),
   create: (data: Partial<Order>) => {
     // Go time.Time requires RFC3339; HTML date inputs return "YYYY-MM-DD"
     const payload = { ...data };
@@ -287,7 +294,7 @@ export const ordersApi = {
 
 // Offers
 export const offersApi = {
-  list: (stock?: boolean) => api.get<Offer[]>(`${BASE}/offers`, { params: { stock } }).then(r => r.data),
+  list: (stock?: boolean, page = 1, limit = 25) => api.get<PagedResult<Offer>>(`${BASE}/offers`, { params: { stock, page, limit } }).then(r => r.data),
   create: (data: Partial<Offer>) => api.post<Offer>(`${BASE}/offers`, data).then(r => r.data),
   get: (id: string) => api.get<Offer>(`${BASE}/offers/${id}`).then(r => r.data),
   update: (id: string, data: Partial<Offer>) => api.put(`${BASE}/offers/${id}`, data),

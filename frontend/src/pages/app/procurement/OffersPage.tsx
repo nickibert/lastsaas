@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { offersApi, suppliersApi, type Offer } from '../../../api/procurement';
 import { ProductSearch } from '../../../components/ProductSearch';
 import { useTenant } from '../../../contexts/TenantContext';
+import { Pagination } from '../../../components/Pagination';
 
 export default function OffersPage() {
   const qc = useQueryClient();
@@ -13,20 +14,29 @@ export default function OffersPage() {
   const [editing, setEditing] = useState<Offer | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Partial<Offer>>({ nameShort: '', description: '', priceUsd: 0, quantity: 0, isStockOffer: false, misc: '' });
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
 
-  const { data: offers = [], isLoading } = useQuery({
-    queryKey: ['offers'],
-    queryFn: () => offersApi.list(),
+  const { data, isLoading } = useQuery({
+    queryKey: ['offers', page, limit],
+    queryFn: () => offersApi.list(undefined, page, limit),
+    enabled,
+    throwOnError: false,
+    placeholderData: prev => prev,
+  });
+
+  const offers = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const pages = data?.pages ?? 1;
+
+  const { data: suppliersData } = useQuery({
+    queryKey: ['suppliers', 1, 500],
+    queryFn: () => suppliersApi.list(1, 500),
     enabled,
     throwOnError: false,
   });
 
-  const { data: suppliers = [] } = useQuery({
-    queryKey: ['suppliers'],
-    queryFn: suppliersApi.list,
-    enabled,
-    throwOnError: false,
-  });
+  const suppliers = suppliersData?.items ?? [];
 
   const [selectedProductName, setSelectedProductName] = useState<string | undefined>();
 
@@ -61,7 +71,7 @@ export default function OffersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Angebote</h1>
-          <p className="text-dark-400 mt-1">{offers.length} Angebote</p>
+          <p className="text-dark-400 mt-1">{total.toLocaleString('de-DE')} Angebote</p>
         </div>
         <button
           onClick={() => { reset(); setEditing(null); setShowForm(true); }}
@@ -172,6 +182,7 @@ export default function OffersPage() {
               ))}
             </tbody>
           </table>
+          <Pagination page={page} pages={pages} total={total} limit={limit} onPage={setPage} onLimit={l => { setLimit(l); setPage(1); }} />
         </div>
       )}
     </div>

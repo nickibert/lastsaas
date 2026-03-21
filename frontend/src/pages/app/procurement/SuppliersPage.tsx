@@ -4,6 +4,7 @@ import { Plus, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { suppliersApi, type Supplier } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
+import { Pagination } from '../../../components/Pagination';
 
 export default function SuppliersPage() {
   const qc = useQueryClient();
@@ -12,13 +13,20 @@ export default function SuppliersPage() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Supplier | null>(null);
   const [form, setForm] = useState<Partial<Supplier>>({ company: '', firstname: '', lastname: '', email: '', origin: '' });
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
 
-  const { data: suppliers = [], isLoading } = useQuery({
-    queryKey: ['suppliers'],
-    queryFn: suppliersApi.list,
+  const { data, isLoading } = useQuery({
+    queryKey: ['suppliers', page, limit],
+    queryFn: () => suppliersApi.list(page, limit),
     enabled,
     throwOnError: false,
+    placeholderData: prev => prev,
   });
+
+  const suppliers = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const pages = data?.pages ?? 1;
 
   const createMutation = useMutation({
     mutationFn: suppliersApi.create,
@@ -57,7 +65,7 @@ export default function SuppliersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Lieferanten</h1>
-          <p className="text-dark-400 mt-1">{suppliers.length} Lieferanten</p>
+          <p className="text-dark-400 mt-1">{total.toLocaleString('de-DE')} Lieferanten</p>
         </div>
         <button
           onClick={() => { resetForm(); setEditing(null); setShowForm(true); }}
@@ -160,6 +168,7 @@ export default function SuppliersPage() {
               )}
             </tbody>
           </table>
+          <Pagination page={page} pages={pages} total={total} limit={limit} onPage={setPage} onLimit={l => { setLimit(l); setPage(1); }} />
         </div>
       )}
     </div>
