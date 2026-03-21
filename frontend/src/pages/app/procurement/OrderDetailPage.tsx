@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Save, Plus, Trash2, Check, X, Calculator, Pencil } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, Check, X, Calculator, Pencil, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   ordersApi, suppliersApi, productsApi, containersApi, harboursApi, freightCarriersApi,
@@ -12,6 +12,47 @@ import { useTenant } from '../../../contexts/TenantContext';
 
 const inputCls = 'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm focus:outline-none focus:border-primary-500';
 const labelCls = 'block text-xs text-dark-400 mb-1';
+
+// Frankfurter API (EZB data, no key required)
+// Returns USD per 1 EUR (= dollarRate in our model)
+async function fetchEurUsdRate(date?: string): Promise<number> {
+  const endpoint = date ? `https://api.frankfurter.app/${date}` : 'https://api.frankfurter.app/latest';
+  const res = await fetch(`${endpoint}?from=EUR&to=USD`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return data.rates.USD as number;
+}
+
+function FetchRateButton({ date, label = 'Vordollarrate', onRate }: {
+  date?: string;
+  label?: string;
+  onRate: (rate: number) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const handle = async () => {
+    setLoading(true);
+    try {
+      const rate = await fetchEurUsdRate(date);
+      onRate(rate);
+      toast.success(`${label}: ${rate.toFixed(4)} (EZB${date ? ' ' + date : ''})`);
+    } catch {
+      toast.error('Kurs konnte nicht abgerufen werden (Frankfurter/EZB)');
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={handle}
+      disabled={loading}
+      title={`Aktuellen Kurs von EZB abrufen${date ? ' für ' + date : ''}`}
+      className="flex-shrink-0 self-end mb-0.5 p-2 rounded-lg text-dark-400 hover:text-primary-400 hover:bg-dark-800 disabled:opacity-40 transition-colors"
+    >
+      <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+    </button>
+  );
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -304,7 +345,10 @@ export default function OrderDetailPage() {
           <NumInput label="Bestellsumme USD" value={draft.orderSumUsd ?? 0} onChange={v => set('orderSumUsd', v)} />
           <NumInput label="Transportversicherung ‰" value={draft.transportInsurancePermille ?? 0} onChange={v => set('transportInsurancePermille', v)} />
           <NumInput label="Rabatt" value={draft.discount ?? 0} onChange={v => set('discount', v)} />
-          <NumInput label="Vordollarrate" value={draft.preDollarRate ?? 0} onChange={v => set('preDollarRate', v)} />
+          <div className="flex items-end gap-1">
+            <NumInput label="Vordollarrate" value={draft.preDollarRate ?? 0} onChange={v => set('preDollarRate', v)} />
+            <FetchRateButton label="Vordollarrate" onRate={v => set('preDollarRate', v)} />
+          </div>
           <NumInput label="Frachtführer-Rechnung EUR" value={draft.invoiceFreightCarrierEur ?? 0} onChange={v => set('invoiceFreightCarrierEur', v)} />
         </div>
       </Section>
@@ -637,7 +681,14 @@ export default function OrderDetailPage() {
                   <input type="date" value={editingPayment.paymentDate?.slice(0, 10) ?? ''}
                     onChange={e => setEditingPayment(ep => ep && ({ ...ep, paymentDate: e.target.value }))} className={inputCls} />
                 </div>
-                <NumInput label="Dollarkurs" value={editingPayment.paymentDollarRate ?? 0} onChange={v => setEditingPayment(ep => ep && ({ ...ep, paymentDollarRate: v }))} />
+                <div className="flex items-end gap-1">
+                  <NumInput label="Dollarkurs" value={editingPayment.paymentDollarRate ?? 0} onChange={v => setEditingPayment(ep => ep && ({ ...ep, paymentDollarRate: v }))} />
+                  <FetchRateButton
+                    date={editingPayment.paymentDate?.slice(0, 10)}
+                    label="Dollarkurs"
+                    onRate={v => setEditingPayment(ep => ep && ({ ...ep, paymentDollarRate: v }))}
+                  />
+                </div>
                 <NumInput label="Bankgebühren" value={editingPayment.paymentFees ?? 0} onChange={v => setEditingPayment(ep => ep && ({ ...ep, paymentFees: v }))} />
                 <div className="flex items-end gap-2 col-span-2">
                   <button onClick={() => updatePaymentMutation.mutate(editingPayment)}
@@ -680,7 +731,14 @@ export default function OrderDetailPage() {
                 <input type="date" value={newPayment.paymentDate?.slice(0, 10) ?? ''}
                   onChange={e => setNewPayment(p => ({ ...p, paymentDate: e.target.value }))} className={inputCls} />
               </div>
-              <NumInput label="Dollarkurs" value={newPayment.paymentDollarRate ?? 0} onChange={v => setNewPayment(p => ({ ...p, paymentDollarRate: v }))} />
+              <div className="flex items-end gap-1">
+                <NumInput label="Dollarkurs" value={newPayment.paymentDollarRate ?? 0} onChange={v => setNewPayment(p => ({ ...p, paymentDollarRate: v }))} />
+                <FetchRateButton
+                  date={newPayment.paymentDate?.slice(0, 10)}
+                  label="Dollarkurs"
+                  onRate={v => setNewPayment(p => ({ ...p, paymentDollarRate: v }))}
+                />
+              </div>
               <NumInput label="Bankgebühren" value={newPayment.paymentFees ?? 0} onChange={v => setNewPayment(p => ({ ...p, paymentFees: v }))} />
               <div className="flex items-end gap-2 col-span-2">
                 <button onClick={() => createPaymentMutation.mutate(newPayment)}
