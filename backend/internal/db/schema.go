@@ -14,11 +14,23 @@ type CollectionSchema struct {
 	Schema     bson.M
 }
 
-// AllSchemas returns the JSON Schema validators for all 15 validated collections.
+// AllSchemas returns the JSON Schema validators for all validated collections.
 func AllSchemas() []CollectionSchema {
 	return []CollectionSchema{
 		usersSchema(),
 		tenantsSchema(),
+		// Procurement collections
+		suppliersSchema(),
+		supplierCodesSchema(),
+		goodsGroupsSchema(),
+		productsSchema(),
+		freightCarriersSchema(),
+		harboursSchema(),
+		containersSchema(),
+		countriesSchema(),
+		ordersSchema(),
+		orderTasksSchema(),
+		offersSchema(),
 		tenantMembershipsSchema(),
 		invitationsSchema(),
 		plansSchema(),
@@ -623,6 +635,217 @@ func eventDefinitionsSchema() CollectionSchema {
 					"updatedAt": bson.M{
 						"bsonType": "date",
 					},
+				},
+			},
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Procurement schemas
+// ---------------------------------------------------------------------------
+
+func suppliersSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "suppliers",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "company", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId": bson.M{"bsonType": "objectId"},
+					"company":  bson.M{"bsonType": "string", "minLength": 1, "maxLength": 200},
+					"email":    bson.M{"bsonType": "string", "maxLength": 120},
+					"createdAt": bson.M{"bsonType": "date"},
+					"updatedAt": bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func supplierCodesSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "supplier_codes",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "supplierId", "short", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":   bson.M{"bsonType": "objectId"},
+					"supplierId": bson.M{"bsonType": "objectId"},
+					"short":      bson.M{"bsonType": "string", "minLength": 1, "maxLength": 10},
+					"createdAt":  bson.M{"bsonType": "date"},
+					"updatedAt":  bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func goodsGroupsSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "goods_groups",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "name", "short", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":  bson.M{"bsonType": "objectId"},
+					"name":      bson.M{"bsonType": "string", "minLength": 1, "maxLength": 100},
+					"short":     bson.M{"bsonType": "string", "minLength": 1, "maxLength": 10},
+					"createdAt": bson.M{"bsonType": "date"},
+					"updatedAt": bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func productsSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "products",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "nameShort", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":  bson.M{"bsonType": "objectId"},
+					"nameShort": bson.M{"bsonType": "string", "minLength": 1, "maxLength": 45},
+					"ean":       bson.M{"bsonType": "string", "maxLength": 32},
+					"wtn":       bson.M{"bsonType": "string", "maxLength": 30},
+					"createdAt": bson.M{"bsonType": "date"},
+					"updatedAt": bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func freightCarriersSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "freight_carriers",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "name", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":  bson.M{"bsonType": "objectId"},
+					"name":      bson.M{"bsonType": "string", "minLength": 1, "maxLength": 50},
+					"createdAt": bson.M{"bsonType": "date"},
+					"updatedAt": bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func harboursSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "harbours",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "name", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":  bson.M{"bsonType": "objectId"},
+					"name":      bson.M{"bsonType": "string", "minLength": 1, "maxLength": 50},
+					"createdAt": bson.M{"bsonType": "date"},
+					"updatedAt": bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func containersSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "containers",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "name", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":  bson.M{"bsonType": "objectId"},
+					"name":      bson.M{"bsonType": "string", "minLength": 1, "maxLength": 50},
+					"volumeM3":  bson.M{"bsonType": "double", "minimum": 0},
+					"createdAt": bson.M{"bsonType": "date"},
+					"updatedAt": bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func countriesSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "countries",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "name", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":  bson.M{"bsonType": "objectId"},
+					"name":      bson.M{"bsonType": "string", "minLength": 1, "maxLength": 50},
+					"createdAt": bson.M{"bsonType": "date"},
+					"updatedAt": bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func ordersSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "orders",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "orderNumber", "orderDate", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":     bson.M{"bsonType": "objectId"},
+					"orderNumber":  bson.M{"bsonType": "string", "minLength": 1, "maxLength": 64},
+					"orderDate":    bson.M{"bsonType": "date"},
+					"orderSumUsd":  bson.M{"bsonType": "double", "minimum": 0},
+					"createdAt":    bson.M{"bsonType": "date"},
+					"updatedAt":    bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func orderTasksSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "order_tasks",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "orderId", "text", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":  bson.M{"bsonType": "objectId"},
+					"orderId":   bson.M{"bsonType": "objectId"},
+					"text":      bson.M{"bsonType": "string", "minLength": 1, "maxLength": 500},
+					"createdAt": bson.M{"bsonType": "date"},
+					"updatedAt": bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func offersSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "offers",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":  bson.M{"bsonType": "objectId"},
+					"priceUsd":  bson.M{"bsonType": "double", "minimum": 0},
+					"createdAt": bson.M{"bsonType": "date"},
+					"updatedAt": bson.M{"bsonType": "date"},
 				},
 			},
 		},

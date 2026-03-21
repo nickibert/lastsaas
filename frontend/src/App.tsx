@@ -25,6 +25,12 @@ const MFAChallengePage = lazy(() => import('./pages/auth/MFAChallengePage'));
 const MagicLinkVerifyPage = lazy(() => import('./pages/auth/MagicLinkVerifyPage'));
 import BootstrapPage from './pages/BootstrapPage';
 
+// Procurement pages (lazy — product-specific feature)
+const ProcurementPage = lazy(() => import('./pages/app/procurement/ProcurementPage'));
+const OrdersPage = lazy(() => import('./pages/app/procurement/OrdersPage'));
+const SuppliersPage = lazy(() => import('./pages/app/procurement/SuppliersPage'));
+const ProductsPage = lazy(() => import('./pages/app/procurement/ProductsPage'));
+
 // App pages (eager — core experience)
 import DashboardPage from './pages/app/DashboardPage';
 import TeamPage from './pages/app/TeamPage';
@@ -161,6 +167,11 @@ export default function App() {
                         <Route path="/settings" element={<SettingsPage />} />
                         <Route path="/activity" element={<ActivityPage />} />
                         <Route path="/test-entitlements" element={<TestEntitlementsPage />} />
+                        {/* Procurement (EasyOne) */}
+                        <Route path="/procurement" element={<Suspense fallback={<LazyFallback />}><ProcurementPage /></Suspense>} />
+                        <Route path="/procurement/orders" element={<Suspense fallback={<LazyFallback />}><OrdersPage /></Suspense>} />
+                        <Route path="/procurement/suppliers" element={<Suspense fallback={<LazyFallback />}><SuppliersPage /></Suspense>} />
+                        <Route path="/procurement/products" element={<Suspense fallback={<LazyFallback />}><ProductsPage /></Suspense>} />
                         <Route path="/messages" element={<Suspense fallback={<LazyFallback />}><AdminMessagesPage /></Suspense>} />
                       </Route>
 

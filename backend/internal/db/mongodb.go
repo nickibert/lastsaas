@@ -481,3 +481,59 @@ func (m *MongoDB) TelemetryEvents() *mongo.Collection {
 func (m *MongoDB) EventDefinitions() *mongo.Collection {
 	return m.Database.Collection("event_definitions")
 }
+
+// ---------------------------------------------------------------------------
+// Procurement collections
+// ---------------------------------------------------------------------------
+
+func (m *MongoDB) Suppliers() *mongo.Collection {
+	return m.Database.Collection("suppliers")
+}
+
+func (m *MongoDB) SupplierCodes() *mongo.Collection {
+	return m.Database.Collection("supplier_codes")
+}
+
+func (m *MongoDB) GoodsGroups() *mongo.Collection {
+	return m.Database.Collection("goods_groups")
+}
+
+func (m *MongoDB) Products() *mongo.Collection {
+	return m.Database.Collection("products")
+}
+
+func (m *MongoDB) FreightCarriers() *mongo.Collection {
+	return m.Database.Collection("freight_carriers")
+}
+
+func (m *MongoDB) Harbours() *mongo.Collection {
+	return m.Database.Collection("harbours")
+}
+
+func (m *MongoDB) ProcurementContainers() *mongo.Collection {
+	return m.Database.Collection("containers")
+}
+
+func (m *MongoDB) ProcurementCountries() *mongo.Collection {
+	return m.Database.Collection("countries")
+}
+
+func (m *MongoDB) Orders() *mongo.Collection {
+	return m.Database.Collection("orders")
+}
+
+func (m *MongoDB) OrderPayments() *mongo.Collection {
+	return m.Database.Collection("order_payments")
+}
+
+func (m *MongoDB) OrderTasks() *mongo.Collection {
+	return m.Database.Collection("order_tasks")
+}
+
+func (m *MongoDB) Offers() *mongo.Collection {
+	return m.Database.Collection("offers")
+}
+
+func (m *MongoDB) ProcurementFiles() *mongo.Collection {
+	return m.Database.Collection("procurement_files")
+}

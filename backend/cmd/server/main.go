@@ -355,6 +355,7 @@ func main() {
 	webhookHandler.SetTelemetry(telemetrySvc)
 	pmHandler := handlers.NewPMHandler(database, telemetrySvc, sysLogger)
 	eventDefsHandler := handlers.NewEventDefinitionsHandler(database, sysLogger)
+	procurementHandler := handlers.NewProcurementHandler(database, sysLogger)
 	telemetryHandler := handlers.NewTelemetryHandler(telemetrySvc)
 	apiKeysHandler := handlers.NewAPIKeysHandler(database, emitter, sysLogger)
 	webhooksHandler := handlers.NewWebhooksHandler(database, sysLogger, webhookDispatcher)
@@ -773,6 +774,9 @@ func main() {
 	adminOwner.HandleFunc("/branding/pages", brandingHandler.CreatePage).Methods("POST")
 	adminOwner.HandleFunc("/branding/pages/{id}", brandingHandler.UpdatePage).Methods("PUT")
 	adminOwner.HandleFunc("/branding/pages/{id}", brandingHandler.DeletePage).Methods("DELETE")
+
+	// Procurement API (all authenticated tenants)
+	procurementHandler.RegisterRoutes(router, authMiddleware.RequireAuth)
 
 	// Serve frontend static files in production
 	if cfg.Frontend.StaticDir != "" {
