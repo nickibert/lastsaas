@@ -188,37 +188,66 @@ export default function OrderDetailPage() {
   const setFreight = (key: keyof OrderFreight, value: unknown) => setDraft(d => ({ ...d, freight: { ...((d.freight ?? {}) as OrderFreight), [key]: value } }));
 
   // Warenbezugskosten-Kalkulation (live, based on current draft values)
+  // Matches legacy get_wbk() formula exactly.
   const calcEK = (() => {
-    const rate = draft.preDollarRate ?? 0;
-    const warenwertUSD = (draft.orderSumUsd ?? 0) - (draft.discount ?? 0);
-    const warenwertEUR = warenwertUSD * rate;
+    const orderSumUSD = draft.orderSumUsd ?? 0;
+    const discount = draft.discount ?? 0;
+
+    // Dollar rate: arithmetic average of payment rates; fallback to preDollarRate
+    const preDollarRate = draft.preDollarRate ?? 0;
+    const ratesWithValue = payments.filter(p => p.paymentDollarRate > 0);
+    const dollarRateAvg = ratesWithValue.length > 0
+      ? ratesWithValue.reduce((s, p) => s + p.paymentDollarRate, 0) / ratesWithValue.length
+      : preDollarRate;
+
+    const totalPaymentFees = payments.reduce((s, p) => s + p.paymentFees, 0);
+
+    const warenwertUSD = orderSumUSD - discount;
+    const warenwertEUR = warenwertUSD * dollarRateAvg;
+
+    // Freight costs
     const f = draft.freight as Partial<OrderFreight> | undefined;
-    const fRate = (f?.dollarRate ?? 0) > 0 ? (f?.dollarRate ?? 0) : rate;
+    const fRate = (f?.dollarRate ?? 0) > 0 ? (f?.dollarRate ?? 0) : dollarRateAvg;
     const totalSeaUSD = (f?.seaFreightUsd ?? 0) + (f?.emergencyBunkerSurchargeUsd ?? 0) +
       (f?.peakSeasonSurchargeUsd ?? 0) + (f?.suezCanalAddonUsd ?? 0) + (f?.dangerPayUsd ?? 0);
     const seaFreightEUR = totalSeaUSD * fRate;
-    const freightageEUR = f?.freightageEur ?? 0;
-    const preFreightageEUR = f?.preFreightageEur ?? 0;
+    const freightageEUR = (f?.freightageEur ?? 0) > 0 ? (f?.freightageEur ?? 0) : (f?.preFreightageEur ?? 0);
     const portFeesEUR = (f?.thcEur ?? 0) + (f?.ispsEur ?? 0) + (f?.blDocFeeEur ?? 0) + (f?.followUpFeesEur ?? 0);
     const customsEUR = (f?.customsClearanceEur ?? 0) + (f?.customsEur ?? 0);
-    const insurancePercent = draft.transportInsurancePercent ?? 0;
-    const insuranceEUR = (draft.orderSumUsd ?? 0) * rate * insurancePercent / 100;
-    const totalFreightEUR = seaFreightEUR + freightageEUR + preFreightageEUR + portFeesEUR + customsEUR + insuranceEUR;
-    const totalEUR = warenwertEUR + totalFreightEUR;
+    const totalFreightEUR = freightageEUR + seaFreightEUR + portFeesEUR + customsEUR;
+
+    const permille = draft.transportInsurancePermille ?? 0;
 
     const products = (draft.products ?? []) as OrderProduct[];
     const totalVolumeM3 = products.reduce((s, p) => s + p.volumeM3 * p.quantity, 0);
+    const totalQuantity = products.reduce((s, p) => s + p.quantity, 0);
+    const hasAllVolumes = products.every(p => p.volumeM3 > 0);
 
     const rows = products.map(p => {
       const prodVolume = p.volumeM3 * p.quantity;
-      const volumeShare = totalVolumeM3 > 0 ? prodVolume / totalVolumeM3 : 0;
-      const allocatedFreightEUR = volumeShare * totalFreightEUR;
-      const unitFreightEUR = p.quantity > 0 ? allocatedFreightEUR / p.quantity : 0;
-      const unitEkEUR = (p.unitPriceUsd * rate) + unitFreightEUR;
-      return { productId: p.productId, quantity: p.quantity, unitPriceUsd: p.unitPriceUsd, volumeM3: p.volumeM3, volumeShare, unitFreightEUR, unitEkEUR };
+      const volumeFactor = (totalVolumeM3 > 0 && hasAllVolumes)
+        ? prodVolume / totalVolumeM3
+        : (totalQuantity > 0 ? p.quantity / totalQuantity : 0);
+      const priceFactor = orderSumUSD > 0 ? p.unitPriceUsd / orderSumUSD : 0;
+
+      const freightShare = totalFreightEUR * volumeFactor;
+      const feesShare = totalPaymentFees * priceFactor;
+      const wbk = (freightShare + feesShare) * (1000 + permille) / 1000;
+
+      const productDiscount = (orderSumUSD + discount) > 0
+        ? discount / (orderSumUSD + discount) * p.unitPriceUsd
+        : 0;
+      const unitEkEUR = dollarRateAvg > 0
+        ? wbk / p.quantity + (p.unitPriceUsd - productDiscount) / dollarRateAvg
+        : 0;
+
+      return { productId: p.productId, quantity: p.quantity, unitPriceUsd: p.unitPriceUsd, volumeM3: p.volumeM3, volumeFactor, freightShare, feesShare, wbk, unitEkEUR };
     });
 
-    return { rate, warenwertUSD, warenwertEUR, totalSeaUSD, seaFreightEUR, freightageEUR, preFreightageEUR, portFeesEUR, customsEUR, insuranceEUR, totalFreightEUR, totalEUR, totalVolumeM3, rows };
+    const totalWBK = rows.reduce((s, r) => s + r.wbk, 0);
+    const totalEUR = warenwertEUR + totalWBK;
+
+    return { dollarRateAvg, warenwertUSD, warenwertEUR, totalSeaUSD, seaFreightEUR, freightageEUR, portFeesEUR, customsEUR, totalFreightEUR, totalPaymentFees, permille, totalWBK, totalEUR, totalVolumeM3, rows };
   })();
 
   if (orderLoading) return <div className="text-dark-400 p-8">Lädt...</div>;
@@ -273,7 +302,7 @@ export default function OrderDetailPage() {
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <NumInput label="Bestellsumme USD" value={draft.orderSumUsd ?? 0} onChange={v => set('orderSumUsd', v)} />
-          <NumInput label="Transportversicherung %" value={draft.transportInsurancePercent ?? 0} onChange={v => set('transportInsurancePercent', v)} />
+          <NumInput label="Transportversicherung ‰" value={draft.transportInsurancePermille ?? 0} onChange={v => set('transportInsurancePermille', v)} />
           <NumInput label="Rabatt" value={draft.discount ?? 0} onChange={v => set('discount', v)} />
           <NumInput label="Vordollarrate" value={draft.preDollarRate ?? 0} onChange={v => set('preDollarRate', v)} />
           <NumInput label="Frachtführer-Rechnung EUR" value={draft.invoiceFreightCarrierEur ?? 0} onChange={v => set('invoiceFreightCarrierEur', v)} />
@@ -471,17 +500,17 @@ export default function OrderDetailPage() {
                   </div>
                 )}
                 <div className="flex justify-between text-dark-300">
-                  <span>Warenwert (netto) × {calcEK.rate.toFixed(4)}</span>
+                  <span>Warenwert (netto) × {calcEK.dollarRateAvg.toFixed(4)}</span>
                   <span className="font-mono">{calcEK.warenwertEUR.toFixed(2)} EUR</span>
                 </div>
                 <div className="border-t border-dark-700 my-1" />
                 <div className="flex justify-between text-dark-300">
-                  <span>Seefracht ({calcEK.totalSeaUSD.toFixed(2)} USD) × {((draft.freight as Partial<OrderFreight>)?.dollarRate ?? 0) > 0 ? ((draft.freight as Partial<OrderFreight>)?.dollarRate ?? 0).toFixed(4) : calcEK.rate.toFixed(4)}</span>
+                  <span>Seefracht ({calcEK.totalSeaUSD.toFixed(2)} USD) × {((draft.freight as Partial<OrderFreight>)?.dollarRate ?? 0) > 0 ? ((draft.freight as Partial<OrderFreight>)?.dollarRate ?? 0).toFixed(4) : calcEK.dollarRateAvg.toFixed(4)}</span>
                   <span className="font-mono">{calcEK.seaFreightEUR.toFixed(2)} EUR</span>
                 </div>
                 <div className="flex justify-between text-dark-300">
-                  <span>Frachtsumme + Vorauszahlung</span>
-                  <span className="font-mono">{(calcEK.freightageEUR + calcEK.preFreightageEUR).toFixed(2)} EUR</span>
+                  <span>Inlandsfrachtkosten</span>
+                  <span className="font-mono">{calcEK.freightageEUR.toFixed(2)} EUR</span>
                 </div>
                 {calcEK.portFeesEUR > 0 && (
                   <div className="flex justify-between text-dark-300">
@@ -495,18 +524,26 @@ export default function OrderDetailPage() {
                     <span className="font-mono">{calcEK.customsEUR.toFixed(2)} EUR</span>
                   </div>
                 )}
-                <div className="flex justify-between text-dark-300">
-                  <span>Transportversicherung</span>
-                  <span className="font-mono">{calcEK.insuranceEUR.toFixed(2)} EUR</span>
-                </div>
+                {calcEK.totalPaymentFees > 0 && (
+                  <div className="flex justify-between text-dark-300">
+                    <span>Zahlungsgebühren</span>
+                    <span className="font-mono">{calcEK.totalPaymentFees.toFixed(2)} EUR</span>
+                  </div>
+                )}
+                {calcEK.permille > 0 && (
+                  <div className="flex justify-between text-dark-300">
+                    <span>Transportversicherung ({calcEK.permille}‰ auf WBK)</span>
+                    <span className="font-mono">{(calcEK.totalWBK - (calcEK.totalFreightEUR + calcEK.totalPaymentFees)).toFixed(2)} EUR</span>
+                  </div>
+                )}
                 <div className="border-t border-dark-700 my-1" />
                 <div className="flex justify-between text-white font-medium">
                   <span>Gesamt Warenbezugskosten</span>
                   <span className="font-mono">{calcEK.totalEUR.toFixed(2)} EUR</span>
                 </div>
                 <div className="flex justify-between text-dark-400">
-                  <span>davon Frachtkosten gesamt</span>
-                  <span className="font-mono">{calcEK.totalFreightEUR.toFixed(2)} EUR</span>
+                  <span>davon WBK (Fracht + Gebühren + Versicherung)</span>
+                  <span className="font-mono">{calcEK.totalWBK.toFixed(2)} EUR</span>
                 </div>
                 <div className="flex justify-between text-dark-400">
                   <span>Gesamtvolumen (Bestellung)</span>
@@ -539,10 +576,10 @@ export default function OrderDetailPage() {
                               {row.volumeM3.toFixed(4)}
                             </td>
                             <td className="py-1.5 pr-2 text-right text-dark-400 font-mono">
-                              {(row.volumeShare * 100).toFixed(1)}%
+                              {(row.volumeFactor * 100).toFixed(1)}%
                             </td>
                             <td className="py-1.5 pr-2 text-right text-dark-400 font-mono">
-                              {row.unitFreightEUR.toFixed(4)}
+                              {(row.wbk / row.quantity).toFixed(4)}
                             </td>
                             <td className="py-1.5 text-right font-medium font-mono text-primary-400">
                               {row.unitEkEUR.toFixed(4)}

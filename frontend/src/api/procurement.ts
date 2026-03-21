@@ -157,7 +157,7 @@ export interface Order {
   orderContents: string;
   misc: string;
   orderSumUsd: number;
-  transportInsurancePercent: number;
+  transportInsurancePermille: number;
   discount: number;
   preDollarRate: number;
   invoiceFreightCarrierEur: number;

@@ -1298,20 +1298,23 @@ func (h *ProcurementHandler) deleteOffer(w http.ResponseWriter, r *http.Request)
 // EK-Kalkulation (Warenbezugskosten)
 // ---------------------------------------------------------------------------
 
-// applyOrderEK calculates the landed cost (EK) per product in an order using
-// volume-weighted freight allocation and writes lastEk / lastEkDate back to
-// every product referenced in the order.
+// applyOrderEK calculates the landed cost (EK) per product using the legacy formula:
 //
-// Formula:
+//	priceFactor  = unitPriceUSD / orderSumUSD
+//	volumeFactor = (productVolumeM3 × qty) / totalOrderVolumeM3
 //
-//	transportInsuranceEUR = orderSumUSD × preDollarRate × transportInsurancePercent / 100
-//	totalFreightEUR = (seaFreightUSD + surcharges) × preDollarRate
-//	                  + freightageEUR + preFreightageEUR + transportInsuranceEUR
+//	freightageEUR = freight.FreightageEUR (fallback: PreFreightageEUR)
+//	              + all additional EUR costs (sea freight, THC, customs, …)
+//	freightShare = freightageEUR × volumeFactor
+//	feesShare    = totalPaymentFees × priceFactor
 //
-//	For each product:
-//	  volumeShare    = (product.volumeM3 × qty) / totalOrderVolumeM3
-//	  allocatedFreight = volumeShare × totalFreightEUR
-//	  unitEkEUR      = (unitPriceUSD × preDollarRate) + (allocatedFreight / qty)
+//	wbk = (freightShare + feesShare) × (1000 + transportInsurancePermille) / 1000
+//
+//	dollarRateAvg = arithmetic mean of payment_dollar_rate values
+//	                (fallback: preDollarRate when no payments exist)
+//	discount = order.Discount / (orderSumUSD + order.Discount) × unitPriceUSD
+//
+//	unitEkEUR = wbk/qty + (unitPriceUSD − discount) / dollarRateAvg
 func (h *ProcurementHandler) applyOrderEK(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := procurementTenantID(r)
 	if !ok {
@@ -1329,39 +1332,68 @@ func (h *ProcurementHandler) applyOrderEK(w http.ResponseWriter, r *http.Request
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	if order.PreDollarRate <= 0 {
-		http.Error(w, "Dollarkurs (preDollarRate) muss > 0 sein", http.StatusBadRequest)
+
+	// --- Dollar rate: average of all payment rates; fallback to preDollarRate ---
+	var payments []models.OrderPayment
+	cur, err := h.db.OrderPayments().Find(r.Context(), bson.M{"orderId": id, "tenantId": tenantID})
+	if err == nil {
+		_ = cur.All(r.Context(), &payments)
+	}
+
+	dollarRateAvg := order.PreDollarRate
+	totalPaymentFees := 0.0
+	if len(payments) > 0 {
+		rateSum := 0.0
+		for _, p := range payments {
+			rateSum += p.PaymentDollarRate
+			totalPaymentFees += p.PaymentFees
+		}
+		if avg := rateSum / float64(len(payments)); avg > 0 {
+			dollarRateAvg = avg
+		}
+	}
+	if dollarRateAvg <= 0 {
+		http.Error(w, "Dollarkurs nicht ermittelbar — Zahlungen oder preDollarRate angeben", http.StatusBadRequest)
 		return
 	}
 
-	// Total freight in EUR — use freight's own dollarRate if set, else order preDollarRate
-	insuranceEUR := order.OrderSumUSD * order.PreDollarRate * order.TransportInsurancePercent / 100
-	totalFreightEUR := insuranceEUR
+	// --- Total freight EUR (all costs allocated by volume) ---
+	totalFreightEUR := 0.0
 	if order.Freight != nil {
-		fRate := order.Freight.DollarRate
+		f := order.Freight
+		fRate := f.DollarRate
 		if fRate <= 0 {
-			fRate = order.PreDollarRate
+			fRate = dollarRateAvg
 		}
-		totalSeaUSD := order.Freight.SeaFreightUSD +
-			order.Freight.EmergencyBunkerSurchargeUSD +
-			order.Freight.PeakSeasonSurchargeUSD +
-			order.Freight.SuezCanalAddonUSD +
-			order.Freight.DangerPayUSD
-		totalFreightEUR += totalSeaUSD*fRate +
-			order.Freight.FreightageEUR +
-			order.Freight.PreFreightageEUR +
-			order.Freight.THCEUR +
-			order.Freight.ISPSEUR +
-			order.Freight.BLDocFeeEUR +
-			order.Freight.FollowUpFeesEUR +
-			order.Freight.CustomsClearanceEUR +
-			order.Freight.CustomsEUR
+		freightageEUR := f.FreightageEUR
+		if freightageEUR == 0 {
+			freightageEUR = f.PreFreightageEUR
+		}
+		totalSeaUSD := f.SeaFreightUSD +
+			f.EmergencyBunkerSurchargeUSD +
+			f.PeakSeasonSurchargeUSD +
+			f.SuezCanalAddonUSD +
+			f.DangerPayUSD
+		totalFreightEUR = freightageEUR +
+			totalSeaUSD*fRate +
+			f.THCEUR +
+			f.ISPSEUR +
+			f.BLDocFeeEUR +
+			f.FollowUpFeesEUR +
+			f.CustomsClearanceEUR +
+			f.CustomsEUR
 	}
 
-	// Total order volume (m³, considering quantity)
+	// --- Total order volume (m³ × quantity) ---
 	totalVolumeM3 := 0.0
+	productsWithoutVolume := 0
+	totalQuantity := 0
 	for _, op := range order.Products {
 		totalVolumeM3 += op.VolumeM3 * float64(op.Quantity)
+		totalQuantity += op.Quantity
+		if op.VolumeM3 == 0 {
+			productsWithoutVolume++
+		}
 	}
 
 	now := time.Now().UTC()
@@ -1372,14 +1404,33 @@ func (h *ProcurementHandler) applyOrderEK(w http.ResponseWriter, r *http.Request
 			continue
 		}
 
-		unitFreightEUR := 0.0
-		if totalVolumeM3 > 0 {
-			productVolume := op.VolumeM3 * float64(op.Quantity)
-			allocatedFreight := (productVolume / totalVolumeM3) * totalFreightEUR
-			unitFreightEUR = allocatedFreight / float64(op.Quantity)
+		// Volume factor (fallback: equal share across all units if volume unknown)
+		var volumeFactor float64
+		if totalVolumeM3 > 0 && productsWithoutVolume == 0 {
+			volumeFactor = (op.VolumeM3 * float64(op.Quantity)) / totalVolumeM3
+		} else if totalQuantity > 0 {
+			volumeFactor = float64(op.Quantity) / float64(totalQuantity)
 		}
 
-		unitEkEUR := math.Round((op.UnitPriceUSD*order.PreDollarRate+unitFreightEUR)*10000) / 10000
+		// Price factor (Preisfaktor für Gebühren)
+		priceFactor := 0.0
+		if order.OrderSumUSD > 0 {
+			priceFactor = op.UnitPriceUSD / order.OrderSumUSD
+		}
+
+		freightShare := totalFreightEUR * volumeFactor
+		feesShare := totalPaymentFees * priceFactor
+
+		// WBK with Promille multiplier
+		wbk := (freightShare + feesShare) * (1000 + order.TransportInsurancePermille) / 1000
+
+		// Discount proportional to product's price share
+		discount := 0.0
+		if order.OrderSumUSD+order.Discount > 0 {
+			discount = order.Discount / (order.OrderSumUSD + order.Discount) * op.UnitPriceUSD
+		}
+
+		unitEkEUR := math.Round((wbk/float64(op.Quantity)+(op.UnitPriceUSD-discount)/dollarRateAvg)*10000) / 10000
 
 		if _, err := h.db.Products().UpdateOne(
 			r.Context(),
