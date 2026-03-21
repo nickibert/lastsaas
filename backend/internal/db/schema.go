@@ -30,6 +30,7 @@ func AllSchemas() []CollectionSchema {
 		countriesSchema(),
 		ordersSchema(),
 		orderTasksSchema(),
+		orderPaymentsSchema(),
 		offersSchema(),
 		tenantMembershipsSchema(),
 		invitationsSchema(),
@@ -828,6 +829,27 @@ func orderTasksSchema() CollectionSchema {
 					"text":      bson.M{"bsonType": "string", "minLength": 1, "maxLength": 500},
 					"createdAt": bson.M{"bsonType": "date"},
 					"updatedAt": bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func orderPaymentsSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "order_payments",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "orderId", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":          bson.M{"bsonType": "objectId"},
+					"orderId":           bson.M{"bsonType": "objectId"},
+					"paymentAmountEur":  bson.M{"bsonType": "double", "minimum": 0},
+					"paymentDollarRate": bson.M{"bsonType": "double", "minimum": 0},
+					"paymentFees":       bson.M{"bsonType": "double", "minimum": 0},
+					"createdAt":         bson.M{"bsonType": "date"},
+					"updatedAt":         bson.M{"bsonType": "date"},
 				},
 			},
 		},

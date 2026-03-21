@@ -110,8 +110,29 @@ export interface OrderFreight {
   shippingDate?: string;
   estimatedArrival?: string;
   arrival?: string;
+  avisShipperDate?: string;
+  docOfOrigin?: string;
+  docOfOriginChecked: boolean;
+  docOfOriginSigned: boolean;
+  docOfOriginShipped: boolean;
   freightageEur: number;
+  preFreightageEur: number;
   seaFreightUsd: number;
+  emergencyBunkerSurchargeUsd: number;
+  peakSeasonSurchargeUsd: number;
+  suezCanalAddonUsd: number;
+}
+
+export interface OrderPayment {
+  id: string;
+  orderId: string;
+  nr: number;
+  paymentAmountEur: number;
+  paymentDate?: string;
+  paymentDollarRate: number;
+  paymentFees: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Order {
@@ -239,12 +260,22 @@ export const ordersApi = {
     return api.post<Order>(`${BASE}/orders`, payload).then(r => r.data);
   },
   get: (id: string) => api.get<Order>(`${BASE}/orders/${id}`).then(r => r.data),
-  update: (id: string, data: Partial<Order>) => api.put(`${BASE}/orders/${id}`, data),
+  update: (id: string, data: Partial<Order>) => {
+    const payload = { ...data };
+    if (payload.orderDate && !payload.orderDate.includes('T')) {
+      payload.orderDate = payload.orderDate + 'T00:00:00Z';
+    }
+    return api.put(`${BASE}/orders/${id}`, payload);
+  },
   delete: (id: string) => api.delete(`${BASE}/orders/${id}`),
   listTasks: (id: string) => api.get<OrderTask[]>(`${BASE}/orders/${id}/tasks`).then(r => r.data),
   createTask: (id: string, data: Partial<OrderTask>) => api.post<OrderTask>(`${BASE}/orders/${id}/tasks`, data).then(r => r.data),
   updateTask: (id: string, taskId: string, data: Partial<OrderTask>) => api.put(`${BASE}/orders/${id}/tasks/${taskId}`, data),
   deleteTask: (id: string, taskId: string) => api.delete(`${BASE}/orders/${id}/tasks/${taskId}`),
+  listPayments: (id: string) => api.get<OrderPayment[]>(`${BASE}/orders/${id}/payments`).then(r => r.data),
+  createPayment: (id: string, data: Partial<OrderPayment>) => api.post<OrderPayment>(`${BASE}/orders/${id}/payments`, data).then(r => r.data),
+  updatePayment: (id: string, paymentId: string, data: Partial<OrderPayment>) => api.put(`${BASE}/orders/${id}/payments/${paymentId}`, data),
+  deletePayment: (id: string, paymentId: string) => api.delete(`${BASE}/orders/${id}/payments/${paymentId}`),
 };
 
 // Offers

@@ -36,6 +36,7 @@ const HarboursPage = lazy(() => import('./pages/app/procurement/HarboursPage'));
 const ContainersPage = lazy(() => import('./pages/app/procurement/ContainersPage'));
 const CountriesPage = lazy(() => import('./pages/app/procurement/CountriesPage'));
 const OffersPage = lazy(() => import('./pages/app/procurement/OffersPage'));
+const OrderDetailPage = lazy(() => import('./pages/app/procurement/OrderDetailPage'));
 
 // App pages (eager — core experience)
 import DashboardPage from './pages/app/DashboardPage';
@@ -176,6 +177,7 @@ export default function App() {
                         {/* Procurement (EasyOne) */}
                         <Route path="/procurement" element={<Suspense fallback={<LazyFallback />}><ProcurementPage /></Suspense>} />
                         <Route path="/procurement/orders" element={<Suspense fallback={<LazyFallback />}><OrdersPage /></Suspense>} />
+                        <Route path="/procurement/orders/:id" element={<Suspense fallback={<LazyFallback />}><OrderDetailPage /></Suspense>} />
                         <Route path="/procurement/suppliers" element={<Suspense fallback={<LazyFallback />}><SuppliersPage /></Suspense>} />
                         <Route path="/procurement/products" element={<Suspense fallback={<LazyFallback />}><ProductsPage /></Suspense>} />
                         <Route path="/procurement/goods-groups" element={<Suspense fallback={<LazyFallback />}><GoodsGroupsPage /></Suspense>} />

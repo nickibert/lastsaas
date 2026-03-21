@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { Plus, Search, Trash2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { ordersApi, suppliersApi, type Order } from '../../../api/procurement';
@@ -7,6 +8,7 @@ import { useTenant } from '../../../contexts/TenantContext';
 
 export default function OrdersPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { activeTenant } = useTenant();
   const enabled = !!activeTenant;
   const [search, setSearch] = useState('');
@@ -195,7 +197,8 @@ export default function OrdersPage() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button className="p-1 text-dark-400 hover:text-primary-400 transition-colors">
+                        <button onClick={() => navigate(`/procurement/orders/${order.id}`)}
+                          className="p-1 text-dark-400 hover:text-primary-400 transition-colors" title="Details">
                           <Eye className="w-4 h-4" />
                         </button>
                         <button

@@ -101,6 +101,12 @@ func (h *ProcurementHandler) RegisterRoutes(r *mux.Router, authMW mux.Middleware
 	s.HandleFunc("/orders/{id}/tasks/{taskId}", h.updateOrderTask).Methods(http.MethodPut)
 	s.HandleFunc("/orders/{id}/tasks/{taskId}", h.deleteOrderTask).Methods(http.MethodDelete)
 
+	// Order payments
+	s.HandleFunc("/orders/{id}/payments", h.listOrderPayments).Methods(http.MethodGet)
+	s.HandleFunc("/orders/{id}/payments", h.createOrderPayment).Methods(http.MethodPost)
+	s.HandleFunc("/orders/{id}/payments/{paymentId}", h.updateOrderPayment).Methods(http.MethodPut)
+	s.HandleFunc("/orders/{id}/payments/{paymentId}", h.deleteOrderPayment).Methods(http.MethodDelete)
+
 	// Offers
 	s.HandleFunc("/offers", h.listOffers).Methods(http.MethodGet)
 	s.HandleFunc("/offers", h.createOffer).Methods(http.MethodPost)
@@ -872,6 +878,8 @@ func (h *ProcurementHandler) updateOrder(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
+	doc.ID = id
+	doc.TenantID = tenantID
 	doc.UpdatedAt = time.Now().UTC()
 	h.db.Orders().UpdateOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID},
 		bson.M{"$set": doc}) //nolint
@@ -969,6 +977,95 @@ func (h *ProcurementHandler) deleteOrderTask(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	h.db.OrderTasks().DeleteOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID}) //nolint
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------------------
+// OrderPayments
+// ---------------------------------------------------------------------------
+
+func (h *ProcurementHandler) listOrderPayments(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	orderID, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid order id", http.StatusBadRequest)
+		return
+	}
+	cursor, _ := h.db.OrderPayments().Find(r.Context(), bson.M{"tenantId": tenantID, "orderId": orderID},
+		options.Find().SetSort(bson.D{{Key: "nr", Value: 1}}))
+	results := make([]models.OrderPayment, 0)
+	cursor.All(r.Context(), &results) //nolint
+	writeJSON(w, http.StatusOK, results)
+}
+
+func (h *ProcurementHandler) createOrderPayment(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	orderID, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid order id", http.StatusBadRequest)
+		return
+	}
+	var doc models.OrderPayment
+	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	doc.ID = primitive.NewObjectID()
+	doc.TenantID = tenantID
+	doc.OrderID = orderID
+	doc.CreatedAt = time.Now().UTC()
+	doc.UpdatedAt = doc.CreatedAt
+	if _, err := h.db.OrderPayments().InsertOne(r.Context(), doc); err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusCreated, doc)
+}
+
+func (h *ProcurementHandler) updateOrderPayment(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "paymentId")
+	if !ok {
+		http.Error(w, "invalid payment id", http.StatusBadRequest)
+		return
+	}
+	var doc models.OrderPayment
+	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	doc.ID = id
+	doc.TenantID = tenantID
+	doc.UpdatedAt = time.Now().UTC()
+	h.db.OrderPayments().UpdateOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID},
+		bson.M{"$set": doc}) //nolint
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *ProcurementHandler) deleteOrderPayment(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "paymentId")
+	if !ok {
+		http.Error(w, "invalid payment id", http.StatusBadRequest)
+		return
+	}
+	h.db.OrderPayments().DeleteOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID}) //nolint
 	w.WriteHeader(http.StatusNoContent)
 }
 
