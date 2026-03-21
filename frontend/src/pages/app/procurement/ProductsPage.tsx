@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Trash2, Pencil, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
-import { productsApi, goodsGroupsApi, supplierCodesApi, type Product } from '../../../api/procurement';
+import { productsApi, goodsGroupsApi, type Product } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
 
 export default function ProductsPage() {
@@ -31,7 +31,6 @@ export default function ProductsPage() {
   const handleSearch = (q: string) => { setSearch(q); setPage(1); };
 
   const { data: goodsGroups = [] } = useQuery({ queryKey: ['goods-groups'], queryFn: goodsGroupsApi.list, enabled, throwOnError: false });
-  const { data: supplierCodes = [] } = useQuery({ queryKey: ['supplier-codes'], queryFn: () => supplierCodesApi.list(), enabled, throwOnError: false });
 
   const createMutation = useMutation({
     mutationFn: productsApi.create,

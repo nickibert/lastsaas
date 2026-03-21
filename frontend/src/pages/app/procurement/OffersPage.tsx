@@ -27,12 +27,13 @@ export default function OffersPage() {
     throwOnError: false,
   });
 
-  const { data: products = [] } = useQuery({
+  const { data: productsData } = useQuery({
     queryKey: ['products'],
     queryFn: () => productsApi.list(),
     enabled,
     throwOnError: false,
   });
+  const products = productsData?.items ?? [];
 
   const createMutation = useMutation({
     mutationFn: offersApi.create,

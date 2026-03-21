@@ -8,7 +8,8 @@ export default function ProcurementPage() {
   const { activeTenant } = useTenant();
   const enabled = !!activeTenant;
   const { data: orders = [] } = useQuery({ queryKey: ['orders'], queryFn: () => ordersApi.list(), enabled, throwOnError: false });
-  const { data: products = [] } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list(), enabled, throwOnError: false });
+  const { data: productsData } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list(), enabled, throwOnError: false });
+  const products = productsData?.items ?? [];
   const { data: suppliers = [] } = useQuery({ queryKey: ['suppliers'], queryFn: suppliersApi.list, enabled, throwOnError: false });
 
   const tiles = [

@@ -58,7 +58,8 @@ export default function OrderDetailPage() {
   });
 
   const { data: suppliers = [] } = useQuery({ queryKey: ['suppliers'], queryFn: suppliersApi.list, enabled, throwOnError: false });
-  const { data: products = [] } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list(), enabled, throwOnError: false });
+  const { data: productsData } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list(), enabled, throwOnError: false });
+  const products = productsData?.items ?? [];
   const { data: containers = [] } = useQuery({ queryKey: ['containers'], queryFn: containersApi.list, enabled, throwOnError: false });
   const { data: harbours = [] } = useQuery({ queryKey: ['harbours'], queryFn: harboursApi.list, enabled, throwOnError: false });
   const { data: freightCarriers = [] } = useQuery({ queryKey: ['freight-carriers'], queryFn: freightCarriersApi.list, enabled, throwOnError: false });
