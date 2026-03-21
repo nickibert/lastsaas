@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Save, Plus, Trash2, Check, X } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, Check, X, Calculator } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   ordersApi, suppliersApi, productsApi, containersApi, harboursApi, freightCarriersApi,
@@ -150,6 +150,9 @@ export default function OrderDetailPage() {
       if (key === 'quantity' || key === 'unitPriceUsd') {
         arr[idx].totalPriceUsd = arr[idx].quantity * arr[idx].unitPriceUsd;
       }
+      if (key === 'lengthMm' || key === 'widthMm' || key === 'heightMm') {
+        arr[idx].volumeM3 = (arr[idx].lengthMm * arr[idx].widthMm * arr[idx].heightMm) / 1e9;
+      }
       return { ...d, products: arr };
     });
   };
@@ -158,9 +161,51 @@ export default function OrderDetailPage() {
     setDraft(d => ({ ...d, products: ((d.products ?? []) as OrderProduct[]).filter((_, i) => i !== idx) }));
   };
 
+  const applyEKMutation = useMutation({
+    mutationFn: () => ordersApi.applyEK(id!),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      toast.success(`EK-Preise für ${res.updated} Produkt(e) übernommen`);
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : 'Fehler';
+      toast.error(msg);
+    },
+  });
+
   // Freight helper
   const freight: Partial<OrderFreight> = (draft.freight as OrderFreight) ?? {};
   const setFreight = (key: keyof OrderFreight, value: unknown) => setDraft(d => ({ ...d, freight: { ...((d.freight ?? {}) as OrderFreight), [key]: value } }));
+
+  // Warenbezugskosten-Kalkulation (live, based on current draft values)
+  const calcEK = (() => {
+    const rate = draft.preDollarRate ?? 0;
+    const warenwertUSD = (draft.orderSumUsd ?? 0) - (draft.discount ?? 0);
+    const warenwertEUR = warenwertUSD * rate;
+    const f = draft.freight as Partial<OrderFreight> | undefined;
+    const totalSeaUSD = (f?.seaFreightUsd ?? 0) + (f?.emergencyBunkerSurchargeUsd ?? 0) +
+      (f?.peakSeasonSurchargeUsd ?? 0) + (f?.suezCanalAddonUsd ?? 0);
+    const seaFreightEUR = totalSeaUSD * rate;
+    const freightageEUR = f?.freightageEur ?? 0;
+    const preFreightageEUR = f?.preFreightageEur ?? 0;
+    const insurance = draft.transportInsurance ?? 0;
+    const totalFreightEUR = seaFreightEUR + freightageEUR + preFreightageEUR + insurance;
+    const totalEUR = warenwertEUR + totalFreightEUR;
+
+    const products = (draft.products ?? []) as OrderProduct[];
+    const totalVolumeM3 = products.reduce((s, p) => s + p.volumeM3 * p.quantity, 0);
+
+    const rows = products.map(p => {
+      const prodVolume = p.volumeM3 * p.quantity;
+      const volumeShare = totalVolumeM3 > 0 ? prodVolume / totalVolumeM3 : 0;
+      const allocatedFreightEUR = volumeShare * totalFreightEUR;
+      const unitFreightEUR = p.quantity > 0 ? allocatedFreightEUR / p.quantity : 0;
+      const unitEkEUR = (p.unitPriceUsd * rate) + unitFreightEUR;
+      return { productId: p.productId, quantity: p.quantity, unitPriceUsd: p.unitPriceUsd, volumeM3: p.volumeM3, volumeShare, unitFreightEUR, unitEkEUR };
+    });
+
+    return { rate, warenwertUSD, warenwertEUR, totalSeaUSD, seaFreightEUR, freightageEUR, preFreightageEUR, insurance, totalFreightEUR, totalEUR, totalVolumeM3, rows };
+  })();
 
   if (orderLoading) return <div className="text-dark-400 p-8">Lädt...</div>;
   if (!order) return <div className="text-dark-400 p-8">Bestellung nicht gefunden</div>;
@@ -373,7 +418,126 @@ export default function OrderDetailPage() {
         </div>
       </Section>
 
-      {/* Section 4: Zahlungen */}
+      {/* Section 4: Warenbezugskosten */}
+      <Section title="Warenbezugskosten & EK-Kalkulation">
+        {calcEK.rate <= 0 ? (
+          <p className="text-amber-400 text-sm">Bitte Dollarkurs (Vordollarrate) in den Grunddaten eintragen.</p>
+        ) : (
+          <>
+            {/* Cost breakdown */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-1 text-sm">
+                <h3 className="text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">Kostenzusammenfassung</h3>
+                <div className="flex justify-between text-dark-300">
+                  <span>Warenwert (brutto)</span>
+                  <span className="font-mono">{(draft.orderSumUsd ?? 0).toFixed(2)} USD</span>
+                </div>
+                {(draft.discount ?? 0) > 0 && (
+                  <div className="flex justify-between text-dark-400">
+                    <span>− Rabatt</span>
+                    <span className="font-mono">−{(draft.discount ?? 0).toFixed(2)} USD</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-dark-300">
+                  <span>Warenwert (netto) × {calcEK.rate.toFixed(4)}</span>
+                  <span className="font-mono">{calcEK.warenwertEUR.toFixed(2)} EUR</span>
+                </div>
+                <div className="border-t border-dark-700 my-1" />
+                <div className="flex justify-between text-dark-300">
+                  <span>Seefracht ({calcEK.totalSeaUSD.toFixed(2)} USD) × Kurs</span>
+                  <span className="font-mono">{calcEK.seaFreightEUR.toFixed(2)} EUR</span>
+                </div>
+                <div className="flex justify-between text-dark-300">
+                  <span>Frachtsumme</span>
+                  <span className="font-mono">{calcEK.freightageEUR.toFixed(2)} EUR</span>
+                </div>
+                <div className="flex justify-between text-dark-300">
+                  <span>Vorauszahlung Fracht</span>
+                  <span className="font-mono">{calcEK.preFreightageEUR.toFixed(2)} EUR</span>
+                </div>
+                <div className="flex justify-between text-dark-300">
+                  <span>Transportversicherung</span>
+                  <span className="font-mono">{calcEK.insurance.toFixed(2)} EUR</span>
+                </div>
+                <div className="border-t border-dark-700 my-1" />
+                <div className="flex justify-between text-white font-medium">
+                  <span>Gesamt Warenbezugskosten</span>
+                  <span className="font-mono">{calcEK.totalEUR.toFixed(2)} EUR</span>
+                </div>
+                <div className="flex justify-between text-dark-400">
+                  <span>davon Frachtkosten gesamt</span>
+                  <span className="font-mono">{calcEK.totalFreightEUR.toFixed(2)} EUR</span>
+                </div>
+                <div className="flex justify-between text-dark-400">
+                  <span>Gesamtvolumen (Bestellung)</span>
+                  <span className="font-mono">{calcEK.totalVolumeM3.toFixed(4)} m³</span>
+                </div>
+              </div>
+
+              {/* Per-product EK */}
+              {calcEK.rows.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">EK je Produkt (inkl. Fracht)</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-dark-700">
+                          <th className="text-left py-1.5 pr-2 text-dark-400 font-medium">Produkt</th>
+                          <th className="text-right py-1.5 pr-2 text-dark-400 font-medium">Vol. m³</th>
+                          <th className="text-right py-1.5 pr-2 text-dark-400 font-medium">Anteil</th>
+                          <th className="text-right py-1.5 pr-2 text-dark-400 font-medium">Fracht/Stk.</th>
+                          <th className="text-right py-1.5 text-dark-400 font-medium">EK EUR/Stk.</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-dark-800/50">
+                        {calcEK.rows.map((row, i) => (
+                          <tr key={i} className="hover:bg-dark-800/20">
+                            <td className="py-1.5 pr-2 text-dark-300 font-mono">
+                              {productNames[row.productId] ?? row.productId.slice(-6)}
+                            </td>
+                            <td className="py-1.5 pr-2 text-right text-dark-400 font-mono">
+                              {row.volumeM3.toFixed(4)}
+                            </td>
+                            <td className="py-1.5 pr-2 text-right text-dark-400 font-mono">
+                              {(row.volumeShare * 100).toFixed(1)}%
+                            </td>
+                            <td className="py-1.5 pr-2 text-right text-dark-400 font-mono">
+                              {row.unitFreightEUR.toFixed(4)}
+                            </td>
+                            <td className="py-1.5 text-right font-medium font-mono text-primary-400">
+                              {row.unitEkEUR.toFixed(4)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {calcEK.totalVolumeM3 === 0 && (
+                    <p className="text-amber-400 text-xs mt-2">Hinweis: Kein Volumen erfasst — Frachtkosten werden nicht auf Produkte verteilt.</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => {
+                  if (calcEK.rate <= 0) { toast.error('Dollarkurs muss > 0 sein'); return; }
+                  if (calcEK.rows.length === 0) { toast.error('Keine Produkte in der Bestellung'); return; }
+                  applyEKMutation.mutate();
+                }}
+                disabled={applyEKMutation.isPending}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 disabled:opacity-50 text-sm"
+              >
+                <Calculator className="w-4 h-4" />
+                {applyEKMutation.isPending ? 'Übernehme...' : 'EK-Preise in Produkte übernehmen'}
+              </button>
+            </div>
+          </>
+        )}
+      </Section>
+
+      {/* Section 6: Zahlungen */}
       <Section title="Zahlungen">
         <div className="space-y-2">
           {payments.length === 0 && !showPaymentForm && (
@@ -429,7 +593,7 @@ export default function OrderDetailPage() {
         )}
       </Section>
 
-      {/* Section 5: Aufgaben */}
+      {/* Section 7: Aufgaben */}
       <Section title="Aufgaben">
         <div className="space-y-2">
           {tasks.length === 0 && (

@@ -265,6 +265,7 @@ export const countriesApi = {
 // Orders
 export const ordersApi = {
   list: (q?: string, page = 1, limit = 25) => api.get<PagedResult<Order>>(`${BASE}/orders`, { params: { q, page, limit } }).then(r => r.data),
+  applyEK: (id: string) => api.post<{ updated: number }>(`${BASE}/orders/${id}/apply-ek`).then(r => r.data),
   create: (data: Partial<Order>) => {
     // Go time.Time requires RFC3339; HTML date inputs return "YYYY-MM-DD"
     const payload = { ...data };

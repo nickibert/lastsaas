@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -95,6 +96,9 @@ func (h *ProcurementHandler) RegisterRoutes(r *mux.Router, authMW mux.Middleware
 	s.HandleFunc("/orders/{id}", h.getOrder).Methods(http.MethodGet)
 	s.HandleFunc("/orders/{id}", h.updateOrder).Methods(http.MethodPut)
 	s.HandleFunc("/orders/{id}", h.deleteOrder).Methods(http.MethodDelete)
+
+	// Order EK calculation
+	s.HandleFunc("/orders/{id}/apply-ek", h.applyOrderEK).Methods(http.MethodPost)
 
 	// Order tasks
 	s.HandleFunc("/orders/{id}/tasks", h.listOrderTasks).Methods(http.MethodGet)
@@ -1273,4 +1277,90 @@ func (h *ProcurementHandler) deleteOffer(w http.ResponseWriter, r *http.Request)
 	}
 	h.db.Offers().DeleteOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID}) //nolint
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------------------
+// EK-Kalkulation (Warenbezugskosten)
+// ---------------------------------------------------------------------------
+
+// applyOrderEK calculates the landed cost (EK) per product in an order using
+// volume-weighted freight allocation and writes lastEk / lastEkDate back to
+// every product referenced in the order.
+//
+// Formula:
+//
+//	totalFreightEUR = (seaFreightUSD + surcharges) × preDollarRate
+//	                  + freightageEUR + preFreightageEUR + transportInsurance
+//
+//	For each product:
+//	  volumeShare    = (product.volumeM3 × qty) / totalOrderVolumeM3
+//	  allocatedFreight = volumeShare × totalFreightEUR
+//	  unitEkEUR      = (unitPriceUSD × preDollarRate) + (allocatedFreight / qty)
+func (h *ProcurementHandler) applyOrderEK(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	var order models.Order
+	if err := h.db.Orders().FindOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID}).Decode(&order); err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if order.PreDollarRate <= 0 {
+		http.Error(w, "Dollarkurs (preDollarRate) muss > 0 sein", http.StatusBadRequest)
+		return
+	}
+
+	// Total freight in EUR
+	totalFreightEUR := order.TransportInsurance
+	if order.Freight != nil {
+		totalSeaUSD := order.Freight.SeaFreightUSD +
+			order.Freight.EmergencyBunkerSurchargeUSD +
+			order.Freight.PeakSeasonSurchargeUSD +
+			order.Freight.SuezCanalAddonUSD
+		totalFreightEUR += totalSeaUSD*order.PreDollarRate +
+			order.Freight.FreightageEUR +
+			order.Freight.PreFreightageEUR
+	}
+
+	// Total order volume (m³, considering quantity)
+	totalVolumeM3 := 0.0
+	for _, op := range order.Products {
+		totalVolumeM3 += op.VolumeM3 * float64(op.Quantity)
+	}
+
+	now := time.Now().UTC()
+	updated := 0
+
+	for _, op := range order.Products {
+		if op.ProductID.IsZero() || op.Quantity <= 0 {
+			continue
+		}
+
+		unitFreightEUR := 0.0
+		if totalVolumeM3 > 0 {
+			productVolume := op.VolumeM3 * float64(op.Quantity)
+			allocatedFreight := (productVolume / totalVolumeM3) * totalFreightEUR
+			unitFreightEUR = allocatedFreight / float64(op.Quantity)
+		}
+
+		unitEkEUR := math.Round((op.UnitPriceUSD*order.PreDollarRate+unitFreightEUR)*10000) / 10000
+
+		if _, err := h.db.Products().UpdateOne(
+			r.Context(),
+			bson.M{"_id": op.ProductID, "tenantId": tenantID},
+			bson.M{"$set": bson.M{"lastEk": unitEkEUR, "lastEkDate": now, "updatedAt": now}},
+		); err == nil {
+			updated++
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
 }
