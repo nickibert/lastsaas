@@ -356,7 +356,7 @@ func importData(ctx context.Context, db *mongo.Database, tenantID primitive.Obje
 				"_id":       idMap.get("goods_group", r["goods_group_id"]),
 				"tenantId":  tenantID,
 				"name":      r["name"],
-				"short":     r["short"],
+				"short":     truncate(r["short"], 100),
 				"legacyId":  parseInt(r["goods_group_id"]),
 				"createdAt": now,
 				"updatedAt": now,

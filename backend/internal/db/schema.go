@@ -690,11 +690,11 @@ func goodsGroupsSchema() CollectionSchema {
 		Schema: bson.M{
 			"$jsonSchema": bson.M{
 				"bsonType": "object",
-				"required": bson.A{"tenantId", "name", "short", "createdAt", "updatedAt"},
+				"required": bson.A{"tenantId", "name", "createdAt", "updatedAt"},
 				"properties": bson.M{
 					"tenantId":  bson.M{"bsonType": "objectId"},
 					"name":      bson.M{"bsonType": "string", "minLength": 1, "maxLength": 100},
-					"short":     bson.M{"bsonType": "string", "minLength": 1, "maxLength": 10},
+					"short":     bson.M{"bsonType": "string", "maxLength": 100},
 					"createdAt": bson.M{"bsonType": "date"},
 					"updatedAt": bson.M{"bsonType": "date"},
 				},
