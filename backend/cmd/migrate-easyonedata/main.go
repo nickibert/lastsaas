@@ -26,6 +26,23 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// insertedCount extracts the number of successfully inserted documents from
+// an InsertMany result, even when a BulkWriteException accompanies it
+// (which happens with SetOrdered(false) and partial failures).
+func insertedCount(res *mongo.InsertManyResult, err error) int {
+	if err == nil {
+		return len(res.InsertedIDs)
+	}
+	if bwe, ok := err.(mongo.BulkWriteException); ok {
+		// BulkWriteException still carries a valid InsertedIDs list
+		_ = bwe
+		if res != nil {
+			return len(res.InsertedIDs)
+		}
+	}
+	return 0
+}
+
 // ---------------------------------------------------------------------------
 // CLI flags
 // ---------------------------------------------------------------------------
@@ -317,10 +334,11 @@ func importData(ctx context.Context, db *mongo.Database, tenantID primitive.Obje
 				ifaces[i] = d
 			}
 			res, err := db.Collection(collection).InsertMany(ctx, ifaces, options.InsertMany().SetOrdered(false))
+			n := insertedCount(res, err)
+			total += n
 			if err != nil {
-				log.Printf("  batch %d-%d ERROR: %v", start, end, err)
-			} else {
-				total += len(res.InsertedIDs)
+				skipped := len(batch) - n
+				log.Printf("  batch %d-%d: inserted %d, skipped %d — %v", start, end, n, skipped, err)
 			}
 		}
 		log.Printf("  inserted %d total", total)
@@ -331,9 +349,9 @@ func importData(ctx context.Context, db *mongo.Database, tenantID primitive.Obje
 		var docs []doc
 		for _, r := range rows["supplier"] {
 			docs = append(docs, doc{
-				"_id":       idMap.get("supplier", r["supplier_id"]),
-				"tenantId":  tenantID,
-				"company":   r["company"],
+				"_id":      idMap.get("supplier", r["supplier_id"]),
+				"tenantId": tenantID,
+				"company":  coalesce(r["company"], r["lastname"], r["firstname"], "(unbekannt)"),
 				"firstname": r["firstname"],
 				"lastname":  r["lastname"],
 				"email":     r["email"],
