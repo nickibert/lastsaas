@@ -142,8 +142,6 @@ export default function OrderDetailPage() {
   const freight: Partial<OrderFreight> = (draft.freight as OrderFreight) ?? {};
   const setFreight = (key: keyof OrderFreight, value: unknown) => setDraft(d => ({ ...d, freight: { ...((d.freight ?? {}) as OrderFreight), [key]: value } }));
 
-  const productName = (pid: string) => products.find(p => p.id === pid)?.nameShort ?? pid;
-
   if (orderLoading) return <div className="text-dark-400 p-8">Lädt...</div>;
   if (!order) return <div className="text-dark-400 p-8">Bestellung nicht gefunden</div>;
 
