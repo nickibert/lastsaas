@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search, Trash2, Eye } from 'lucide-react';
@@ -14,7 +15,7 @@ export default function OrdersPage() {
   const enabled = !!activeTenant;
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(25);
+  const [limit, setLimit] = useLocalStorage<number>('table_page_size', 25);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Partial<Order>>({
     orderNumber: '',

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
@@ -12,13 +13,14 @@ export default function ProductsPage() {
   const enabled = !!activeTenant;
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useLocalStorage<number>('table_page_size', 25);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState<Partial<Product>>({ nameShort: '', nameLong: '', ean: '', wtn: '' });
 
   const { data, isLoading } = useQuery({
-    queryKey: ['products', search, page],
-    queryFn: () => productsApi.list(search || undefined, page),
+    queryKey: ['products', search, page, limit],
+    queryFn: () => productsApi.list(search || undefined, page, limit),
     enabled,
     throwOnError: false,
     placeholderData: prev => prev,
@@ -52,7 +54,7 @@ export default function ProductsPage() {
 
   const resetForm = () => setForm({ nameShort: '', nameLong: '', ean: '', wtn: '' });
 
-  const startEdit = (p: Product) => { setEditing(p); setForm(p); setShowForm(true); };
+  const startEdit = (p: Product) => { window.scrollTo({ top: 0, behavior: 'smooth' }); setEditing(p); setForm(p); setShowForm(true); };
 
   const submit = () => {
     if (editing) updateMutation.mutate({ id: editing.id, data: form });
@@ -188,7 +190,7 @@ export default function ProductsPage() {
             </tbody>
           </table>
 
-          <Pagination page={page} pages={pages} total={total} limit={50} onPage={setPage} onLimit={() => {}} />
+          <Pagination page={page} pages={pages} total={total} limit={limit} onPage={setPage} onLimit={l => { setLimit(l); setPage(1); }} />
         </div>
       )}
     </div>

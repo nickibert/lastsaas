@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
@@ -15,7 +16,7 @@ export default function OffersPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Partial<Offer>>({ nameShort: '', description: '', priceUsd: 0, quantity: 0, isStockOffer: false, misc: '' });
   const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(25);
+  const [limit, setLimit] = useLocalStorage<number>('table_page_size', 25);
 
   const { data, isLoading } = useQuery({
     queryKey: ['offers', page, limit],
@@ -172,7 +173,7 @@ export default function OffersPage() {
                   <td className="px-4 py-3 text-right text-dark-300 text-sm">{o.quantity}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <button onClick={() => { setEditing(o); setForm({ nameShort: o.nameShort, description: o.description, priceUsd: o.priceUsd, quantity: o.quantity, isStockOffer: o.isStockOffer, supplierId: o.supplierId, productId: o.productId, misc: o.misc }); setShowForm(false); }}
+                      <button onClick={() => { window.scrollTo({ top: 0, behavior: 'smooth' }); setEditing(o); setForm({ nameShort: o.nameShort, description: o.description, priceUsd: o.priceUsd, quantity: o.quantity, isStockOffer: o.isStockOffer, supplierId: o.supplierId, productId: o.productId, misc: o.misc }); setShowForm(false); }}
                         className="p-1 text-dark-400 hover:text-primary-400"><Pencil className="w-4 h-4" /></button>
                       <button onClick={() => { if (confirm(`${o.nameShort} löschen?`)) deleteMutation.mutate(o.id); }}
                         className="p-1 text-dark-400 hover:text-red-400"><Trash2 className="w-4 h-4" /></button>

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
@@ -14,7 +15,7 @@ export default function SuppliersPage() {
   const [editing, setEditing] = useState<Supplier | null>(null);
   const [form, setForm] = useState<Partial<Supplier>>({ company: '', firstname: '', lastname: '', email: '', origin: '' });
   const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(25);
+  const [limit, setLimit] = useLocalStorage<number>('table_page_size', 25);
 
   const { data, isLoading } = useQuery({
     queryKey: ['suppliers', page, limit],
@@ -48,6 +49,7 @@ export default function SuppliersPage() {
   const resetForm = () => setForm({ company: '', firstname: '', lastname: '', email: '', origin: '' });
 
   const startEdit = (s: Supplier) => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     setEditing(s);
     setForm({ company: s.company, firstname: s.firstname, lastname: s.lastname, email: s.email, origin: s.origin, skype: s.skype, misc: s.misc });
   };

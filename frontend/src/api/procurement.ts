@@ -223,7 +223,7 @@ export interface ProductsPage {
 
 // Products
 export const productsApi = {
-  list: (q?: string, page = 1) => api.get<ProductsPage>(`${BASE}/products`, { params: { q, page } }).then(r => r.data),
+  list: (q?: string, page = 1, limit = 25) => api.get<ProductsPage>(`${BASE}/products`, { params: { q, page, limit } }).then(r => r.data),
   create: (data: Partial<Product>) => api.post<Product>(`${BASE}/products`, data).then(r => r.data),
   get: (id: string) => api.get<Product>(`${BASE}/products/${id}`).then(r => r.data),
   update: (id: string, data: Partial<Product>) => api.put(`${BASE}/products/${id}`, data),

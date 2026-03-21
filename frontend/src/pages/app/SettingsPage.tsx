@@ -6,6 +6,7 @@ import ProfileTab from './settings/ProfileTab';
 import SecurityTab from './settings/SecurityTab';
 import SessionsTab from './settings/SessionsTab';
 import BillingTab from './settings/BillingTab';
+import AppearanceTab from './settings/AppearanceTab';
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -16,13 +17,14 @@ export default function SettingsPage() {
   const showSecurityTab = passkeysEnabled || showMfaSection;
 
   const tabs = useMemo(() => [
-    { key: 'profile' as const, label: 'Profile' },
-    ...(showSecurityTab ? [{ key: 'security' as const, label: 'Security' }] : []),
-    { key: 'sessions' as const, label: 'Sessions' },
-    { key: 'billing' as const, label: 'Billing' },
+    { key: 'profile' as const, label: 'Profil' },
+    ...(showSecurityTab ? [{ key: 'security' as const, label: 'Sicherheit' }] : []),
+    { key: 'sessions' as const, label: 'Sitzungen' },
+    { key: 'billing' as const, label: 'Abrechnung' },
+    { key: 'appearance' as const, label: 'Darstellung' },
   ], [showSecurityTab]);
 
-  const [tab, setTab] = useState<'profile' | 'security' | 'sessions' | 'billing'>('profile');
+  const [tab, setTab] = useState<'profile' | 'security' | 'sessions' | 'billing' | 'appearance'>('profile');
 
   return (
     <div>
@@ -31,7 +33,7 @@ export default function SettingsPage() {
           <Settings className="w-7 h-7 text-primary-400" />
           Settings
         </h1>
-        <p className="text-dark-400 mt-1">Manage your account</p>
+        <p className="text-dark-400 mt-1">Konto & Einstellungen</p>
       </div>
 
       {/* Tab Navigation */}
@@ -55,6 +57,7 @@ export default function SettingsPage() {
       {tab === 'security' && <SecurityTab />}
       {tab === 'sessions' && <SessionsTab />}
       {tab === 'billing' && <BillingTab />}
+      {tab === 'appearance' && <AppearanceTab />}
     </div>
   );
 }

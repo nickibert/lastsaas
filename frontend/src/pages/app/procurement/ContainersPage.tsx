@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
@@ -14,7 +15,7 @@ export default function ContainersPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Partial<Container>>({ name: '', description: '', volumeM3: 0, heightM: 0, lengthM: 0, widthM: 0 });
   const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(25);
+  const [limit, setLimit] = useLocalStorage<number>('table_page_size', 25);
 
   const { data, isLoading } = useQuery({
     queryKey: ['containers', page, limit],
@@ -128,7 +129,7 @@ export default function ContainersPage() {
                   <td className="px-4 py-3 text-right text-dark-300 text-sm font-mono">{c.volumeM3 || '—'}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <button onClick={() => { setEditing(c); setForm({ name: c.name, description: c.description, volumeM3: c.volumeM3, heightM: c.heightM, lengthM: c.lengthM, widthM: c.widthM }); setShowForm(false); }}
+                      <button onClick={() => { window.scrollTo({ top: 0, behavior: 'smooth' }); setEditing(c); setForm({ name: c.name, description: c.description, volumeM3: c.volumeM3, heightM: c.heightM, lengthM: c.lengthM, widthM: c.widthM }); setShowForm(false); }}
                         className="p-1 text-dark-400 hover:text-primary-400"><Pencil className="w-4 h-4" /></button>
                       <button onClick={() => { if (confirm(`${c.name} löschen?`)) deleteMutation.mutate(c.id); }}
                         className="p-1 text-dark-400 hover:text-red-400"><Trash2 className="w-4 h-4" /></button>
