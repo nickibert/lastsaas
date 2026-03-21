@@ -101,11 +101,12 @@ export default function OffersPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm text-dark-400 mb-1">Produkt</label>
+              <label className="block text-sm text-dark-400 mb-1">Produkt{form.supplierId ? ' (gefiltert nach Lieferant)' : ''}</label>
               <ProductSearch
                 value={form.productId}
                 currentName={selectedProductName}
                 onChange={(id, p) => { setForm(f => ({ ...f, productId: id })); setSelectedProductName(p.nameShort); }}
+                supplierId={form.supplierId}
                 className="w-full"
               />
             </div>

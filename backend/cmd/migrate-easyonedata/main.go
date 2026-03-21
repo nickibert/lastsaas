@@ -126,6 +126,15 @@ func tableColumns(table string) []string {
 		"orders_products": {"orders_id", "products_id", "quantity", "unit_price_usd", "total_price_usd",
 			"length_mm", "width_mm", "height_mm", "volume", "weight_kg", "credited", "inventory_checked"},
 		"orders_payments": {"payment_id", "orders_id", "nr", "payment_amount", "payment_date", "payment_dollar_rate", "payment_fees"},
+		"orders_freight": {"orders_freight_id", "container_id", "harbour_id_from", "harbour_id_to", "orders_id",
+			"freight_carrier_id", "proforma_invoice", "commercial_invoice", "estimated_arrival", "shipping_date",
+			"packing_list", "avis_shipper_date", "doc_of_origin", "doo_checked", "doo_signed", "doo_shipped",
+			"arrival", "container_nr", "freighter_invoice", "freightage", "pre_freightage",
+			"sea_freight_usd", "emergency_bunker_surcharge_usd", "peak_season_surcharge_usd",
+			"suez_canal_addon_usd", "danger_pay_usd", "dollar_rate",
+			"thc_eur", "isps_eur", "bl_doc_fee_eur", "follow_up_fees_oldb_eur",
+			"customs_clearance_eur", "customs_eur", "customs_percent", "ztn"},
+		"products_supplier": {"products_id", "supplier_id"},
 	}
 	return cols[table]
 }
@@ -501,6 +510,93 @@ func importData(ctx context.Context, db *mongo.Database, tenantID primitive.Obje
 		insertAll("products", docs)
 	}
 
+	// Build products_supplier index: products_id → []supplierOID
+	suppliersByProduct := make(map[string][]primitive.ObjectID)
+	for _, r := range rows["products_supplier"] {
+		pid := r["products_id"]
+		sid := r["supplier_id"]
+		if pid == "" || sid == "" || sid == "0" {
+			continue
+		}
+		oid := idMap.get("supplier", sid)
+		suppliersByProduct[pid] = append(suppliersByProduct[pid], oid)
+	}
+	// Second pass: update products with supplierIds (and primary supplierId if not set)
+	if len(suppliersByProduct) > 0 && !dryRun {
+		log.Printf("[products] patching %d products with supplierIds", len(suppliersByProduct))
+		patched := 0
+		for pid, sids := range suppliersByProduct {
+			productOID := idMap.get("product", pid)
+			update := bson.M{"supplierIds": sids}
+			// Set primary supplierId to first entry if not already set
+			update["supplierId"] = sids[0]
+			_, err := db.Collection("products").UpdateOne(ctx,
+				bson.M{"_id": productOID, "tenantId": tenantID},
+				bson.M{"$set": update},
+			)
+			if err == nil {
+				patched++
+			}
+		}
+		log.Printf("[products] patched supplierIds for %d products", patched)
+	}
+
+	// Build orders_freight index: orders_id → freight doc
+	freightByOrder := make(map[string]doc)
+	for _, r := range rows["orders_freight"] {
+		oid := r["orders_id"]
+		if oid == "" {
+			continue
+		}
+		f := doc{
+			"containerId":      idMap.get("container", r["container_id"]),
+			"harbourIdFrom":    idMap.get("harbour", r["harbour_id_from"]),
+			"harbourIdTo":      idMap.get("harbour", r["harbour_id_to"]),
+			"freightCarrierId": idMap.get("freight_carrier", r["freight_carrier_id"]),
+			"containerNr":      r["container_nr"],
+			// Dates
+			"docOfOriginChecked":  parseBool(r["doo_checked"]),
+			"docOfOriginSigned":   parseBool(r["doo_signed"]),
+			"docOfOriginShipped":  parseBool(r["doo_shipped"]),
+			// Sea freight (USD)
+			"seaFreightUsd":               parseFloat(r["sea_freight_usd"]),
+			"emergencyBunkerSurchargeUsd": parseFloat(r["emergency_bunker_surcharge_usd"]),
+			"peakSeasonSurchargeUsd":      parseFloat(r["peak_season_surcharge_usd"]),
+			"suezCanalAddonUsd":           parseFloat(r["suez_canal_addon_usd"]),
+			"dangerPayUsd":                parseFloat(r["danger_pay_usd"]),
+			"dollarRate":                  parseFloat(r["dollar_rate"]),
+			// Domestic / port costs (EUR)
+			"freightageEur":       parseFloat(r["freightage"]),
+			"preFreightageEur":    parseFloat(r["pre_freightage"]),
+			"thcEur":              parseFloat(r["thc_eur"]),
+			"ispsEur":             parseFloat(r["isps_eur"]),
+			"blDocFeeEur":         parseFloat(r["bl_doc_fee_eur"]),
+			"followUpFeesEur":     parseFloat(r["follow_up_fees_oldb_eur"]),
+			"customsClearanceEur": parseFloat(r["customs_clearance_eur"]),
+			"customsEur":          parseFloat(r["customs_eur"]),
+			"customsPercent":      parseFloat(r["customs_percent"]),
+			"ztn":                 r["ztn"],
+		}
+		if dt := parseDate(r["shipping_date"]); dt != nil {
+			f["shippingDate"] = dt
+		}
+		if dt := parseDate(r["estimated_arrival"]); dt != nil {
+			f["estimatedArrival"] = dt
+		}
+		if dt := parseDate(r["arrival"]); dt != nil {
+			f["arrival"] = dt
+		}
+		if dt := parseDate(r["avis_shipper_date"]); dt != nil {
+			f["avisShipperDate"] = dt
+		}
+		if dt := parseDate(r["doc_of_origin"]); dt != nil {
+			f["docOfOrigin"] = dt
+		}
+		// Last freight entry per order wins (orders can have multiple freight legs)
+		freightByOrder[oid] = f
+	}
+	log.Printf("[orders_freight] mapped %d freight records to orders", len(freightByOrder))
+
 	// Build orders_products index: orders_id → []orderProduct
 	opByOrder := make(map[string][]doc)
 	for _, r := range rows["orders_products"] {
@@ -547,6 +643,9 @@ func importData(ctx context.Context, db *mongo.Database, tenantID primitive.Obje
 			}
 			if r["supplier_id"] != "" && r["supplier_id"] != "0" {
 				d["supplierId"] = idMap.get("supplier", r["supplier_id"])
+			}
+			if f, ok := freightByOrder[r["orders_id"]]; ok {
+				d["freight"] = f
 			}
 			docs = append(docs, d)
 		}

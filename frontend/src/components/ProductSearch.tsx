@@ -6,18 +6,19 @@ interface Props {
   value?: string;          // current productId
   currentName?: string;    // display name when not searching
   onChange: (id: string, product: Product) => void;
+  supplierId?: string;     // if set, only show products from this supplier
   className?: string;
 }
 
-export function ProductSearch({ value, currentName, onChange, className = '' }: Props) {
+export function ProductSearch({ value, currentName, onChange, supplierId, className = '' }: Props) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const { data } = useQuery({
-    queryKey: ['product-search', q],
-    queryFn: () => productsApi.list(q || undefined, 1),
+    queryKey: ['product-search', q, supplierId],
+    queryFn: () => productsApi.list(q || undefined, 1, 25, supplierId),
     enabled: open,
     throwOnError: false,
   });

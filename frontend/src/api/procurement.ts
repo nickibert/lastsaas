@@ -34,6 +34,7 @@ export interface Product {
   id: string;
   nameShort: string;
   ownNameShort: string;
+  supplierIds?: string[];
   nameLong: string;
   description: string;
   ean: string;
@@ -115,12 +116,25 @@ export interface OrderFreight {
   docOfOriginChecked: boolean;
   docOfOriginSigned: boolean;
   docOfOriginShipped: boolean;
-  freightageEur: number;
-  preFreightageEur: number;
+  // Sea freight (USD)
   seaFreightUsd: number;
   emergencyBunkerSurchargeUsd: number;
   peakSeasonSurchargeUsd: number;
   suezCanalAddonUsd: number;
+  dangerPayUsd: number;
+  dollarRate: number;
+  // Domestic / port costs (EUR)
+  freightageEur: number;
+  preFreightageEur: number;
+  thcEur: number;
+  ispsEur: number;
+  blDocFeeEur: number;
+  followUpFeesEur: number;
+  // Customs (EUR)
+  customsClearanceEur: number;
+  customsEur: number;
+  customsPercent: number;
+  ztn: string;
 }
 
 export interface OrderPayment {
@@ -223,7 +237,7 @@ export interface ProductsPage {
 
 // Products
 export const productsApi = {
-  list: (q?: string, page = 1, limit = 25) => api.get<ProductsPage>(`${BASE}/products`, { params: { q, page, limit } }).then(r => r.data),
+  list: (q?: string, page = 1, limit = 25, supplierId?: string) => api.get<ProductsPage>(`${BASE}/products`, { params: { q, page, limit, supplierId } }).then(r => r.data),
   create: (data: Partial<Product>) => api.post<Product>(`${BASE}/products`, data).then(r => r.data),
   get: (id: string) => api.get<Product>(`${BASE}/products/${id}`).then(r => r.data),
   update: (id: string, data: Partial<Product>) => api.put(`${BASE}/products/${id}`, data),

@@ -73,6 +73,8 @@ type Product struct {
 	LengthMM int     `json:"lengthMm" bson:"lengthMm" validate:"min=0"`
 	WeightKg float64 `json:"weightKg" bson:"weightKg" validate:"min=0"`
 	VPE      int     `json:"vpe" bson:"vpe" validate:"min=0"` // Verpackungseinheit
+	// Supplier relationships (many-to-many via legacy products_supplier table)
+	SupplierIDs []primitive.ObjectID `json:"supplierIds,omitempty" bson:"supplierIds,omitempty"`
 	// Pricing
 	LastEK     float64    `json:"lastEk" bson:"lastEk" validate:"min=0"`
 	LastEKDate *time.Time `json:"lastEkDate,omitempty" bson:"lastEkDate,omitempty"`
@@ -199,29 +201,43 @@ type OrderProduct struct {
 }
 
 type OrderFreight struct {
-	ContainerID                primitive.ObjectID  `json:"containerId" bson:"containerId"`
-	HarbourIDFrom              primitive.ObjectID  `json:"harbourIdFrom" bson:"harbourIdFrom"`
-	HarbourIDTo                primitive.ObjectID  `json:"harbourIdTo" bson:"harbourIdTo"`
-	FreightCarrierID           primitive.ObjectID  `json:"freightCarrierId" bson:"freightCarrierId"`
-	ContainerNr                string              `json:"containerNr" bson:"containerNr" validate:"omitempty,max=32"`
-	ShippingDate               *time.Time          `json:"shippingDate,omitempty" bson:"shippingDate,omitempty"`
-	EstimatedArrival           *time.Time          `json:"estimatedArrival,omitempty" bson:"estimatedArrival,omitempty"`
-	Arrival                    *time.Time          `json:"arrival,omitempty" bson:"arrival,omitempty"`
-	AvisShipperDate            *time.Time          `json:"avisShipperDate,omitempty" bson:"avisShipperDate,omitempty"`
-	DocOfOrigin                *time.Time          `json:"docOfOrigin,omitempty" bson:"docOfOrigin,omitempty"`
-	DocOfOriginChecked         bool                `json:"docOfOriginChecked" bson:"docOfOriginChecked"`
-	DocOfOriginSigned          bool                `json:"docOfOriginSigned" bson:"docOfOriginSigned"`
-	DocOfOriginShipped         bool                `json:"docOfOriginShipped" bson:"docOfOriginShipped"`
-	ProformaInvoiceFileID      *primitive.ObjectID `json:"proformaInvoiceFileId,omitempty" bson:"proformaInvoiceFileId,omitempty"`
-	CommercialInvoiceFileID    *primitive.ObjectID `json:"commercialInvoiceFileId,omitempty" bson:"commercialInvoiceFileId,omitempty"`
-	PackingListFileID          *primitive.ObjectID `json:"packingListFileId,omitempty" bson:"packingListFileId,omitempty"`
-	FreighterInvoiceFileID     *primitive.ObjectID `json:"freighterInvoiceFileId,omitempty" bson:"freighterInvoiceFileId,omitempty"`
-	FreightageEUR              float64             `json:"freightageEur" bson:"freightageEur" validate:"min=0"`
-	PreFreightageEUR           float64             `json:"preFreightageEur" bson:"preFreightageEur" validate:"min=0"`
-	SeaFreightUSD              float64             `json:"seaFreightUsd" bson:"seaFreightUsd" validate:"min=0"`
-	EmergencyBunkerSurchargeUSD float64            `json:"emergencyBunkerSurchargeUsd" bson:"emergencyBunkerSurchargeUsd" validate:"min=0"`
-	PeakSeasonSurchargeUSD     float64             `json:"peakSeasonSurchargeUsd" bson:"peakSeasonSurchargeUsd" validate:"min=0"`
-	SuezCanalAddonUSD          float64             `json:"suezCanalAddonUsd" bson:"suezCanalAddonUsd" validate:"min=0"`
+	ContainerID                 primitive.ObjectID  `json:"containerId" bson:"containerId"`
+	HarbourIDFrom               primitive.ObjectID  `json:"harbourIdFrom" bson:"harbourIdFrom"`
+	HarbourIDTo                 primitive.ObjectID  `json:"harbourIdTo" bson:"harbourIdTo"`
+	FreightCarrierID            primitive.ObjectID  `json:"freightCarrierId" bson:"freightCarrierId"`
+	ContainerNr                 string              `json:"containerNr" bson:"containerNr" validate:"omitempty,max=32"`
+	ShippingDate                *time.Time          `json:"shippingDate,omitempty" bson:"shippingDate,omitempty"`
+	EstimatedArrival            *time.Time          `json:"estimatedArrival,omitempty" bson:"estimatedArrival,omitempty"`
+	Arrival                     *time.Time          `json:"arrival,omitempty" bson:"arrival,omitempty"`
+	AvisShipperDate             *time.Time          `json:"avisShipperDate,omitempty" bson:"avisShipperDate,omitempty"`
+	DocOfOrigin                 *time.Time          `json:"docOfOrigin,omitempty" bson:"docOfOrigin,omitempty"`
+	DocOfOriginChecked          bool                `json:"docOfOriginChecked" bson:"docOfOriginChecked"`
+	DocOfOriginSigned           bool                `json:"docOfOriginSigned" bson:"docOfOriginSigned"`
+	DocOfOriginShipped          bool                `json:"docOfOriginShipped" bson:"docOfOriginShipped"`
+	ProformaInvoiceFileID       *primitive.ObjectID `json:"proformaInvoiceFileId,omitempty" bson:"proformaInvoiceFileId,omitempty"`
+	CommercialInvoiceFileID     *primitive.ObjectID `json:"commercialInvoiceFileId,omitempty" bson:"commercialInvoiceFileId,omitempty"`
+	PackingListFileID           *primitive.ObjectID `json:"packingListFileId,omitempty" bson:"packingListFileId,omitempty"`
+	FreighterInvoiceFileID      *primitive.ObjectID `json:"freighterInvoiceFileId,omitempty" bson:"freighterInvoiceFileId,omitempty"`
+	// Sea freight costs (USD)
+	SeaFreightUSD               float64 `json:"seaFreightUsd" bson:"seaFreightUsd" validate:"min=0"`
+	EmergencyBunkerSurchargeUSD float64 `json:"emergencyBunkerSurchargeUsd" bson:"emergencyBunkerSurchargeUsd" validate:"min=0"`
+	PeakSeasonSurchargeUSD      float64 `json:"peakSeasonSurchargeUsd" bson:"peakSeasonSurchargeUsd" validate:"min=0"`
+	SuezCanalAddonUSD           float64 `json:"suezCanalAddonUsd" bson:"suezCanalAddonUsd" validate:"min=0"`
+	DangerPayUSD                float64 `json:"dangerPayUsd" bson:"dangerPayUsd" validate:"min=0"`
+	// Dollar rate used for this freight leg (may differ from order's preDollarRate)
+	DollarRate                  float64 `json:"dollarRate" bson:"dollarRate" validate:"min=0"`
+	// Domestic / port costs (EUR)
+	FreightageEUR               float64 `json:"freightageEur" bson:"freightageEur" validate:"min=0"`
+	PreFreightageEUR            float64 `json:"preFreightageEur" bson:"preFreightageEur" validate:"min=0"`
+	THCEUR                      float64 `json:"thcEur" bson:"thcEur" validate:"min=0"`           // Terminal Handling Charge
+	ISPSEUR                     float64 `json:"ispsEur" bson:"ispsEur" validate:"min=0"`          // ISPS Security Surcharge
+	BLDocFeeEUR                 float64 `json:"blDocFeeEur" bson:"blDocFeeEur" validate:"min=0"`  // Bill of Lading doc fee
+	FollowUpFeesEUR             float64 `json:"followUpFeesEur" bson:"followUpFeesEur" validate:"min=0"`
+	// Customs (EUR)
+	CustomsClearanceEUR         float64 `json:"customsClearanceEur" bson:"customsClearanceEur" validate:"min=0"`
+	CustomsEUR                  float64 `json:"customsEur" bson:"customsEur" validate:"min=0"`
+	CustomsPercent              float64 `json:"customsPercent" bson:"customsPercent" validate:"min=0"`
+	ZTN                         string  `json:"ztn" bson:"ztn" validate:"omitempty,max=12"` // Zolltarifnummer reference
 }
 
 type Order struct {

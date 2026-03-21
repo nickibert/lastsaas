@@ -183,13 +183,16 @@ export default function OrderDetailPage() {
     const warenwertUSD = (draft.orderSumUsd ?? 0) - (draft.discount ?? 0);
     const warenwertEUR = warenwertUSD * rate;
     const f = draft.freight as Partial<OrderFreight> | undefined;
+    const fRate = (f?.dollarRate ?? 0) > 0 ? (f?.dollarRate ?? 0) : rate;
     const totalSeaUSD = (f?.seaFreightUsd ?? 0) + (f?.emergencyBunkerSurchargeUsd ?? 0) +
-      (f?.peakSeasonSurchargeUsd ?? 0) + (f?.suezCanalAddonUsd ?? 0);
-    const seaFreightEUR = totalSeaUSD * rate;
+      (f?.peakSeasonSurchargeUsd ?? 0) + (f?.suezCanalAddonUsd ?? 0) + (f?.dangerPayUsd ?? 0);
+    const seaFreightEUR = totalSeaUSD * fRate;
     const freightageEUR = f?.freightageEur ?? 0;
     const preFreightageEUR = f?.preFreightageEur ?? 0;
+    const portFeesEUR = (f?.thcEur ?? 0) + (f?.ispsEur ?? 0) + (f?.blDocFeeEur ?? 0) + (f?.followUpFeesEur ?? 0);
+    const customsEUR = (f?.customsClearanceEur ?? 0) + (f?.customsEur ?? 0);
     const insurance = draft.transportInsurance ?? 0;
-    const totalFreightEUR = seaFreightEUR + freightageEUR + preFreightageEUR + insurance;
+    const totalFreightEUR = seaFreightEUR + freightageEUR + preFreightageEUR + portFeesEUR + customsEUR + insurance;
     const totalEUR = warenwertEUR + totalFreightEUR;
 
     const products = (draft.products ?? []) as OrderProduct[];
@@ -204,7 +207,7 @@ export default function OrderDetailPage() {
       return { productId: p.productId, quantity: p.quantity, unitPriceUsd: p.unitPriceUsd, volumeM3: p.volumeM3, volumeShare, unitFreightEUR, unitEkEUR };
     });
 
-    return { rate, warenwertUSD, warenwertEUR, totalSeaUSD, seaFreightEUR, freightageEUR, preFreightageEUR, insurance, totalFreightEUR, totalEUR, totalVolumeM3, rows };
+    return { rate, warenwertUSD, warenwertEUR, totalSeaUSD, seaFreightEUR, freightageEUR, preFreightageEUR, portFeesEUR, customsEUR, insurance, totalFreightEUR, totalEUR, totalVolumeM3, rows };
   })();
 
   if (orderLoading) return <div className="text-dark-400 p-8">Lädt...</div>;
@@ -295,6 +298,7 @@ export default function OrderDetailPage() {
                       value={op.productId}
                       currentName={op.productId ? (productNames[op.productId] ?? op.productId) : undefined}
                       onChange={(id, p) => { updateProduct(idx, 'productId', id); setProductName(id, p); }}
+                      supplierId={draft.supplierId}
                     />
                   </td>
                   <td className="py-2 pr-3">
@@ -409,12 +413,29 @@ export default function OrderDetailPage() {
           ))}
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <NumInput label="Frachtsumme EUR" value={freight.freightageEur ?? 0} onChange={v => setFreight('freightageEur', v)} />
-          <NumInput label="Vorauszahlung Fracht EUR" value={freight.preFreightageEur ?? 0} onChange={v => setFreight('preFreightageEur', v)} />
           <NumInput label="Seefracht USD" value={freight.seaFreightUsd ?? 0} onChange={v => setFreight('seaFreightUsd', v)} />
           <NumInput label="EBS USD" value={freight.emergencyBunkerSurchargeUsd ?? 0} onChange={v => setFreight('emergencyBunkerSurchargeUsd', v)} />
           <NumInput label="PSS USD" value={freight.peakSeasonSurchargeUsd ?? 0} onChange={v => setFreight('peakSeasonSurchargeUsd', v)} />
           <NumInput label="Suez-Kanal-Zuschlag USD" value={freight.suezCanalAddonUsd ?? 0} onChange={v => setFreight('suezCanalAddonUsd', v)} />
+          <NumInput label="Gefahrgutzuschlag USD" value={freight.dangerPayUsd ?? 0} onChange={v => setFreight('dangerPayUsd', v)} />
+          <NumInput label="Dollarkurs (Fracht)" value={freight.dollarRate ?? 0} onChange={v => setFreight('dollarRate', v)} step="0.00001" />
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <NumInput label="Frachtsumme EUR" value={freight.freightageEur ?? 0} onChange={v => setFreight('freightageEur', v)} />
+          <NumInput label="Vorauszahlung Fracht EUR" value={freight.preFreightageEur ?? 0} onChange={v => setFreight('preFreightageEur', v)} />
+          <NumInput label="THC EUR" value={freight.thcEur ?? 0} onChange={v => setFreight('thcEur', v)} />
+          <NumInput label="ISPS EUR" value={freight.ispsEur ?? 0} onChange={v => setFreight('ispsEur', v)} />
+          <NumInput label="Konnossement-Gebühr EUR" value={freight.blDocFeeEur ?? 0} onChange={v => setFreight('blDocFeeEur', v)} />
+          <NumInput label="Nachfolgegebühren EUR" value={freight.followUpFeesEur ?? 0} onChange={v => setFreight('followUpFeesEur', v)} />
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <NumInput label="Zollabfertigung EUR" value={freight.customsClearanceEur ?? 0} onChange={v => setFreight('customsClearanceEur', v)} />
+          <NumInput label="Zoll EUR" value={freight.customsEur ?? 0} onChange={v => setFreight('customsEur', v)} />
+          <NumInput label="Zollsatz %" value={freight.customsPercent ?? 0} onChange={v => setFreight('customsPercent', v)} step="0.001" />
+          <div>
+            <label className={labelCls}>ZTN / Referenz</label>
+            <input type="text" value={freight.ztn ?? ''} onChange={e => setFreight('ztn', e.target.value)} className={inputCls} />
+          </div>
         </div>
       </Section>
 
@@ -444,17 +465,25 @@ export default function OrderDetailPage() {
                 </div>
                 <div className="border-t border-dark-700 my-1" />
                 <div className="flex justify-between text-dark-300">
-                  <span>Seefracht ({calcEK.totalSeaUSD.toFixed(2)} USD) × Kurs</span>
+                  <span>Seefracht ({calcEK.totalSeaUSD.toFixed(2)} USD) × {((draft.freight as Partial<OrderFreight>)?.dollarRate ?? 0) > 0 ? ((draft.freight as Partial<OrderFreight>)?.dollarRate ?? 0).toFixed(4) : calcEK.rate.toFixed(4)}</span>
                   <span className="font-mono">{calcEK.seaFreightEUR.toFixed(2)} EUR</span>
                 </div>
                 <div className="flex justify-between text-dark-300">
-                  <span>Frachtsumme</span>
-                  <span className="font-mono">{calcEK.freightageEUR.toFixed(2)} EUR</span>
+                  <span>Frachtsumme + Vorauszahlung</span>
+                  <span className="font-mono">{(calcEK.freightageEUR + calcEK.preFreightageEUR).toFixed(2)} EUR</span>
                 </div>
-                <div className="flex justify-between text-dark-300">
-                  <span>Vorauszahlung Fracht</span>
-                  <span className="font-mono">{calcEK.preFreightageEUR.toFixed(2)} EUR</span>
-                </div>
+                {calcEK.portFeesEUR > 0 && (
+                  <div className="flex justify-between text-dark-300">
+                    <span>Hafengebühren (THC, ISPS, BL, etc.)</span>
+                    <span className="font-mono">{calcEK.portFeesEUR.toFixed(2)} EUR</span>
+                  </div>
+                )}
+                {calcEK.customsEUR > 0 && (
+                  <div className="flex justify-between text-dark-300">
+                    <span>Zoll + Zollabfertigung</span>
+                    <span className="font-mono">{calcEK.customsEUR.toFixed(2)} EUR</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-dark-300">
                   <span>Transportversicherung</span>
                   <span className="font-mono">{calcEK.insurance.toFixed(2)} EUR</span>

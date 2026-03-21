@@ -479,6 +479,21 @@ func (h *ProcurementHandler) listProducts(w http.ResponseWriter, r *http.Request
 			bson.M{"ean": bson.M{"$regex": q, "$options": "i"}},
 		}
 	}
+	if sid := r.URL.Query().Get("supplierId"); sid != "" {
+		if oid, err := primitive.ObjectIDFromHex(sid); err == nil {
+			// Match products where supplierId OR supplierIds contains the given supplier
+			supplierFilter := bson.M{"$or": bson.A{
+				bson.M{"supplierId": oid},
+				bson.M{"supplierIds": oid},
+			}}
+			if _, hasOr := filter["$or"]; hasOr {
+				// Combine with existing $or via $and
+				filter = bson.M{"$and": bson.A{filter, supplierFilter}}
+			} else {
+				filter["$or"] = supplierFilter["$or"]
+			}
+		}
+	}
 	page, pageSize, skip := parsePagination(r)
 	total, _ := h.db.Products().CountDocuments(r.Context(), filter)
 	cursor, err := h.db.Products().Find(r.Context(), filter,
@@ -1318,16 +1333,27 @@ func (h *ProcurementHandler) applyOrderEK(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Total freight in EUR
+	// Total freight in EUR — use freight's own dollarRate if set, else order preDollarRate
 	totalFreightEUR := order.TransportInsurance
 	if order.Freight != nil {
+		fRate := order.Freight.DollarRate
+		if fRate <= 0 {
+			fRate = order.PreDollarRate
+		}
 		totalSeaUSD := order.Freight.SeaFreightUSD +
 			order.Freight.EmergencyBunkerSurchargeUSD +
 			order.Freight.PeakSeasonSurchargeUSD +
-			order.Freight.SuezCanalAddonUSD
-		totalFreightEUR += totalSeaUSD*order.PreDollarRate +
+			order.Freight.SuezCanalAddonUSD +
+			order.Freight.DangerPayUSD
+		totalFreightEUR += totalSeaUSD*fRate +
 			order.Freight.FreightageEUR +
-			order.Freight.PreFreightageEUR
+			order.Freight.PreFreightageEUR +
+			order.Freight.THCEUR +
+			order.Freight.ISPSEUR +
+			order.Freight.BLDocFeeEUR +
+			order.Freight.FollowUpFeesEUR +
+			order.Freight.CustomsClearanceEUR +
+			order.Freight.CustomsEUR
 	}
 
 	// Total order volume (m³, considering quantity)
