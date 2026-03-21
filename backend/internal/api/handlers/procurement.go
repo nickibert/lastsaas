@@ -150,7 +150,7 @@ func (h *ProcurementHandler) listSuppliers(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
-	var results []models.Supplier
+	results := make([]models.Supplier, 0)
 	if err := cursor.All(ctx, &results); err != nil {
 		http.Error(w, "decode error", http.StatusInternalServerError)
 		return
@@ -275,7 +275,7 @@ func (h *ProcurementHandler) listSupplierCodes(w http.ResponseWriter, r *http.Re
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
-	var results []models.SupplierCode
+	results := make([]models.SupplierCode, 0)
 	if err := cursor.All(r.Context(), &results); err != nil {
 		http.Error(w, "decode error", http.StatusInternalServerError)
 		return
@@ -360,7 +360,7 @@ func (h *ProcurementHandler) listGoodsGroups(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
-	var results []models.GoodsGroup
+	results := make([]models.GoodsGroup, 0)
 	cursor.All(r.Context(), &results) //nolint
 	writeJSON(w, http.StatusOK, results)
 }
@@ -443,7 +443,7 @@ func (h *ProcurementHandler) listProducts(w http.ResponseWriter, r *http.Request
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
-	var results []models.Product
+	results := make([]models.Product, 0)
 	cursor.All(r.Context(), &results) //nolint
 	writeJSON(w, http.StatusOK, results)
 }
@@ -537,7 +537,7 @@ func (h *ProcurementHandler) listFreightCarriers(w http.ResponseWriter, r *http.
 		return
 	}
 	cursor, _ := h.db.FreightCarriers().Find(r.Context(), bson.M{"tenantId": tenantID}, options.Find().SetSort(bson.D{{Key: "name", Value: 1}}))
-	var results []models.FreightCarrier
+	results := make([]models.FreightCarrier, 0)
 	cursor.All(r.Context(), &results) //nolint
 	writeJSON(w, http.StatusOK, results)
 }
@@ -602,7 +602,7 @@ func (h *ProcurementHandler) listHarbours(w http.ResponseWriter, r *http.Request
 		return
 	}
 	cursor, _ := h.db.Harbours().Find(r.Context(), bson.M{"tenantId": tenantID}, options.Find().SetSort(bson.D{{Key: "name", Value: 1}}))
-	var results []models.Harbour
+	results := make([]models.Harbour, 0)
 	cursor.All(r.Context(), &results) //nolint
 	writeJSON(w, http.StatusOK, results)
 }
@@ -667,7 +667,7 @@ func (h *ProcurementHandler) listContainers(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	cursor, _ := h.db.ProcurementContainers().Find(r.Context(), bson.M{"tenantId": tenantID}, options.Find().SetSort(bson.D{{Key: "name", Value: 1}}))
-	var results []models.Container
+	results := make([]models.Container, 0)
 	cursor.All(r.Context(), &results) //nolint
 	writeJSON(w, http.StatusOK, results)
 }
@@ -733,7 +733,7 @@ func (h *ProcurementHandler) listCountries(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	cursor, _ := h.db.ProcurementCountries().Find(r.Context(), bson.M{"tenantId": tenantID}, options.Find().SetSort(bson.D{{Key: "name", Value: 1}}))
-	var results []models.Country
+	results := make([]models.Country, 0)
 	cursor.All(r.Context(), &results) //nolint
 	writeJSON(w, http.StatusOK, results)
 }
@@ -810,7 +810,7 @@ func (h *ProcurementHandler) listOrders(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
-	var results []models.Order
+	results := make([]models.Order, 0)
 	cursor.All(r.Context(), &results) //nolint
 	writeJSON(w, http.StatusOK, results)
 }
@@ -910,7 +910,7 @@ func (h *ProcurementHandler) listOrderTasks(w http.ResponseWriter, r *http.Reque
 	}
 	cursor, _ := h.db.OrderTasks().Find(r.Context(), bson.M{"tenantId": tenantID, "orderId": orderID},
 		options.Find().SetSort(bson.D{{Key: "dueDate", Value: 1}}))
-	var results []models.OrderTask
+	results := make([]models.OrderTask, 0)
 	cursor.All(r.Context(), &results) //nolint
 	writeJSON(w, http.StatusOK, results)
 }
@@ -987,7 +987,7 @@ func (h *ProcurementHandler) listOffers(w http.ResponseWriter, r *http.Request) 
 		filter["isStockOffer"] = true
 	}
 	cursor, _ := h.db.Offers().Find(r.Context(), filter, options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}))
-	var results []models.Offer
+	results := make([]models.Offer, 0)
 	cursor.All(r.Context(), &results) //nolint
 	writeJSON(w, http.StatusOK, results)
 }
