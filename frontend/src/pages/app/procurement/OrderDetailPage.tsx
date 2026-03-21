@@ -525,7 +525,7 @@ export default function OrderDetailPage() {
 
       {/* Section 4: Warenbezugskosten */}
       <Section title="Warenbezugskosten & EK-Kalkulation">
-        {calcEK.rate <= 0 ? (
+        {calcEK.dollarRateAvg <= 0 ? (
           <p className="text-amber-400 text-sm">Bitte Dollarkurs (Vordollarrate) in den Grunddaten eintragen.</p>
         ) : (
           <>
@@ -643,7 +643,7 @@ export default function OrderDetailPage() {
             <div className="flex justify-end pt-2">
               <button
                 onClick={() => {
-                  if (calcEK.rate <= 0) { toast.error('Dollarkurs muss > 0 sein'); return; }
+                  if (calcEK.dollarRateAvg <= 0) { toast.error('Dollarkurs muss > 0 sein'); return; }
                   if (calcEK.rows.length === 0) { toast.error('Keine Produkte in der Bestellung'); return; }
                   applyEKMutation.mutate();
                 }}
