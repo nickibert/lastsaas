@@ -249,7 +249,7 @@ type Order struct {
 	OrderContents             string              `json:"orderContents" bson:"orderContents" validate:"omitempty,max=255"`
 	Misc                      string              `json:"misc" bson:"misc"`
 	OrderSumUSD               float64             `json:"orderSumUsd" bson:"orderSumUsd" validate:"min=0"`
-	TransportInsurance        float64             `json:"transportInsurance" bson:"transportInsurance" validate:"min=0"`
+	TransportInsurancePercent float64             `json:"transportInsurancePercent" bson:"transportInsurancePercent" validate:"min=0"`
 	Discount                  float64             `json:"discount" bson:"discount" validate:"min=0"`
 	PreDollarRate             float64             `json:"preDollarRate" bson:"preDollarRate" validate:"min=0"`
 	InvoiceFreightCarrierEUR  float64             `json:"invoiceFreightCarrierEur" bson:"invoiceFreightCarrierEur" validate:"min=0"`

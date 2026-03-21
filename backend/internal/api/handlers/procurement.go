@@ -1304,8 +1304,9 @@ func (h *ProcurementHandler) deleteOffer(w http.ResponseWriter, r *http.Request)
 //
 // Formula:
 //
+//	transportInsuranceEUR = orderSumUSD × preDollarRate × transportInsurancePercent / 100
 //	totalFreightEUR = (seaFreightUSD + surcharges) × preDollarRate
-//	                  + freightageEUR + preFreightageEUR + transportInsurance
+//	                  + freightageEUR + preFreightageEUR + transportInsuranceEUR
 //
 //	For each product:
 //	  volumeShare    = (product.volumeM3 × qty) / totalOrderVolumeM3
@@ -1334,7 +1335,8 @@ func (h *ProcurementHandler) applyOrderEK(w http.ResponseWriter, r *http.Request
 	}
 
 	// Total freight in EUR — use freight's own dollarRate if set, else order preDollarRate
-	totalFreightEUR := order.TransportInsurance
+	insuranceEUR := order.OrderSumUSD * order.PreDollarRate * order.TransportInsurancePercent / 100
+	totalFreightEUR := insuranceEUR
 	if order.Freight != nil {
 		fRate := order.Freight.DollarRate
 		if fRate <= 0 {

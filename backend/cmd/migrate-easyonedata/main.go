@@ -630,7 +630,7 @@ func importData(ctx context.Context, db *mongo.Database, tenantID primitive.Obje
 				"orderContents":            r["order_contents"],
 				"misc":                     r["misc"],
 				"orderSumUsd":              parseFloat(r["order_sum_usd"]),
-				"transportInsurance":       parseFloat(r["transport_insurance"]),
+				"transportInsurancePercent": parseFloat(r["transport_insurance"]),
 				"discount":                 parseFloat(r["discount"]),
 				"preDollarRate":            parseFloat(r["pre_dollar_rate"]),
 				"invoiceFreightCarrierEur": parseFloat(r["invoice_freight_carrier_eur"]),

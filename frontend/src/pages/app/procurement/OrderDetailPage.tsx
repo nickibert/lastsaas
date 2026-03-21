@@ -201,8 +201,9 @@ export default function OrderDetailPage() {
     const preFreightageEUR = f?.preFreightageEur ?? 0;
     const portFeesEUR = (f?.thcEur ?? 0) + (f?.ispsEur ?? 0) + (f?.blDocFeeEur ?? 0) + (f?.followUpFeesEur ?? 0);
     const customsEUR = (f?.customsClearanceEur ?? 0) + (f?.customsEur ?? 0);
-    const insurance = draft.transportInsurance ?? 0;
-    const totalFreightEUR = seaFreightEUR + freightageEUR + preFreightageEUR + portFeesEUR + customsEUR + insurance;
+    const insurancePercent = draft.transportInsurancePercent ?? 0;
+    const insuranceEUR = (draft.orderSumUsd ?? 0) * rate * insurancePercent / 100;
+    const totalFreightEUR = seaFreightEUR + freightageEUR + preFreightageEUR + portFeesEUR + customsEUR + insuranceEUR;
     const totalEUR = warenwertEUR + totalFreightEUR;
 
     const products = (draft.products ?? []) as OrderProduct[];
@@ -217,7 +218,7 @@ export default function OrderDetailPage() {
       return { productId: p.productId, quantity: p.quantity, unitPriceUsd: p.unitPriceUsd, volumeM3: p.volumeM3, volumeShare, unitFreightEUR, unitEkEUR };
     });
 
-    return { rate, warenwertUSD, warenwertEUR, totalSeaUSD, seaFreightEUR, freightageEUR, preFreightageEUR, portFeesEUR, customsEUR, insurance, totalFreightEUR, totalEUR, totalVolumeM3, rows };
+    return { rate, warenwertUSD, warenwertEUR, totalSeaUSD, seaFreightEUR, freightageEUR, preFreightageEUR, portFeesEUR, customsEUR, insuranceEUR, totalFreightEUR, totalEUR, totalVolumeM3, rows };
   })();
 
   if (orderLoading) return <div className="text-dark-400 p-8">Lädt...</div>;
@@ -272,7 +273,7 @@ export default function OrderDetailPage() {
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <NumInput label="Bestellsumme USD" value={draft.orderSumUsd ?? 0} onChange={v => set('orderSumUsd', v)} />
-          <NumInput label="Transportversicherung" value={draft.transportInsurance ?? 0} onChange={v => set('transportInsurance', v)} />
+          <NumInput label="Transportversicherung %" value={draft.transportInsurancePercent ?? 0} onChange={v => set('transportInsurancePercent', v)} />
           <NumInput label="Rabatt" value={draft.discount ?? 0} onChange={v => set('discount', v)} />
           <NumInput label="Vordollarrate" value={draft.preDollarRate ?? 0} onChange={v => set('preDollarRate', v)} />
           <NumInput label="Frachtführer-Rechnung EUR" value={draft.invoiceFreightCarrierEur ?? 0} onChange={v => set('invoiceFreightCarrierEur', v)} />
@@ -496,7 +497,7 @@ export default function OrderDetailPage() {
                 )}
                 <div className="flex justify-between text-dark-300">
                   <span>Transportversicherung</span>
-                  <span className="font-mono">{calcEK.insurance.toFixed(2)} EUR</span>
+                  <span className="font-mono">{calcEK.insuranceEUR.toFixed(2)} EUR</span>
                 </div>
                 <div className="border-t border-dark-700 my-1" />
                 <div className="flex justify-between text-white font-medium">
