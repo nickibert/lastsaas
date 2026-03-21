@@ -30,6 +30,12 @@ const ProcurementPage = lazy(() => import('./pages/app/procurement/ProcurementPa
 const OrdersPage = lazy(() => import('./pages/app/procurement/OrdersPage'));
 const SuppliersPage = lazy(() => import('./pages/app/procurement/SuppliersPage'));
 const ProductsPage = lazy(() => import('./pages/app/procurement/ProductsPage'));
+const GoodsGroupsPage = lazy(() => import('./pages/app/procurement/GoodsGroupsPage'));
+const FreightCarriersPage = lazy(() => import('./pages/app/procurement/FreightCarriersPage'));
+const HarboursPage = lazy(() => import('./pages/app/procurement/HarboursPage'));
+const ContainersPage = lazy(() => import('./pages/app/procurement/ContainersPage'));
+const CountriesPage = lazy(() => import('./pages/app/procurement/CountriesPage'));
+const OffersPage = lazy(() => import('./pages/app/procurement/OffersPage'));
 
 // App pages (eager — core experience)
 import DashboardPage from './pages/app/DashboardPage';
@@ -172,6 +178,12 @@ export default function App() {
                         <Route path="/procurement/orders" element={<Suspense fallback={<LazyFallback />}><OrdersPage /></Suspense>} />
                         <Route path="/procurement/suppliers" element={<Suspense fallback={<LazyFallback />}><SuppliersPage /></Suspense>} />
                         <Route path="/procurement/products" element={<Suspense fallback={<LazyFallback />}><ProductsPage /></Suspense>} />
+                        <Route path="/procurement/goods-groups" element={<Suspense fallback={<LazyFallback />}><GoodsGroupsPage /></Suspense>} />
+                        <Route path="/procurement/freight-carriers" element={<Suspense fallback={<LazyFallback />}><FreightCarriersPage /></Suspense>} />
+                        <Route path="/procurement/harbours" element={<Suspense fallback={<LazyFallback />}><HarboursPage /></Suspense>} />
+                        <Route path="/procurement/containers" element={<Suspense fallback={<LazyFallback />}><ContainersPage /></Suspense>} />
+                        <Route path="/procurement/countries" element={<Suspense fallback={<LazyFallback />}><CountriesPage /></Suspense>} />
+                        <Route path="/procurement/offers" element={<Suspense fallback={<LazyFallback />}><OffersPage /></Suspense>} />
                         <Route path="/messages" element={<Suspense fallback={<LazyFallback />}><AdminMessagesPage /></Suspense>} />
                       </Route>
 

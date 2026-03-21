@@ -230,7 +230,14 @@ export const countriesApi = {
 // Orders
 export const ordersApi = {
   list: (q?: string) => api.get<Order[]>(`${BASE}/orders`, { params: { q } }).then(r => r.data),
-  create: (data: Partial<Order>) => api.post<Order>(`${BASE}/orders`, data).then(r => r.data),
+  create: (data: Partial<Order>) => {
+    // Go time.Time requires RFC3339; HTML date inputs return "YYYY-MM-DD"
+    const payload = { ...data };
+    if (payload.orderDate && !payload.orderDate.includes('T')) {
+      payload.orderDate = payload.orderDate + 'T00:00:00Z';
+    }
+    return api.post<Order>(`${BASE}/orders`, payload).then(r => r.data);
+  },
   get: (id: string) => api.get<Order>(`${BASE}/orders/${id}`).then(r => r.data),
   update: (id: string, data: Partial<Order>) => api.put(`${BASE}/orders/${id}`, data),
   delete: (id: string) => api.delete(`${BASE}/orders/${id}`),
