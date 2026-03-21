@@ -128,6 +128,22 @@ func procurementTenantID(r *http.Request) (primitive.ObjectID, bool) {
 	return tenant.ID, true
 }
 
+// parsePagination reads ?page=N&limit=N from the request.
+// Returns page (1-based), limit, and skip.
+// If limit is 0 the caller should load all documents.
+func parsePagination(r *http.Request) (page, limit, skip int64) {
+	limit = 25
+	page = 1
+	if l, err := strconv.ParseInt(r.URL.Query().Get("limit"), 10, 64); err == nil && l > 0 && l <= 500 {
+		limit = l
+	}
+	if p, err := strconv.ParseInt(r.URL.Query().Get("page"), 10, 64); err == nil && p > 0 {
+		page = p
+	}
+	skip = (page - 1) * limit
+	return
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -150,19 +166,23 @@ func (h *ProcurementHandler) listSuppliers(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	ctx := r.Context()
-	cursor, err := h.db.Suppliers().Find(ctx, bson.M{"tenantId": tenantID},
-		options.Find().SetSort(bson.D{{Key: "company", Value: 1}}))
+	filter := bson.M{"tenantId": tenantID}
+	page, limit, skip := parsePagination(r)
+	total, _ := h.db.Suppliers().CountDocuments(r.Context(), filter)
+	cursor, err := h.db.Suppliers().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "company", Value: 1}}).SetSkip(skip).SetLimit(limit))
 	if err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
 	results := make([]models.Supplier, 0)
-	if err := cursor.All(ctx, &results); err != nil {
-		http.Error(w, "decode error", http.StatusInternalServerError)
-		return
-	}
-	writeJSON(w, http.StatusOK, results)
+	cursor.All(r.Context(), &results) //nolint
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": results,
+		"total": total,
+		"page":  page,
+		"pages": (total + limit - 1) / limit,
+	})
 }
 
 func (h *ProcurementHandler) createSupplier(w http.ResponseWriter, r *http.Request) {
@@ -362,14 +382,23 @@ func (h *ProcurementHandler) listGoodsGroups(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	cursor, err := h.db.GoodsGroups().Find(r.Context(), bson.M{"tenantId": tenantID}, options.Find().SetSort(bson.D{{Key: "name", Value: 1}}))
+	filter := bson.M{"tenantId": tenantID}
+	page, limit, skip := parsePagination(r)
+	total, _ := h.db.GoodsGroups().CountDocuments(r.Context(), filter)
+	cursor, err := h.db.GoodsGroups().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "name", Value: 1}}).SetSkip(skip).SetLimit(limit))
 	if err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
 	results := make([]models.GoodsGroup, 0)
 	cursor.All(r.Context(), &results) //nolint
-	writeJSON(w, http.StatusOK, results)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": results,
+		"total": total,
+		"page":  page,
+		"pages": (total + limit - 1) / limit,
+	})
 }
 
 func (h *ProcurementHandler) createGoodsGroup(w http.ResponseWriter, r *http.Request) {
@@ -561,10 +590,23 @@ func (h *ProcurementHandler) listFreightCarriers(w http.ResponseWriter, r *http.
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	cursor, _ := h.db.FreightCarriers().Find(r.Context(), bson.M{"tenantId": tenantID}, options.Find().SetSort(bson.D{{Key: "name", Value: 1}}))
+	filter := bson.M{"tenantId": tenantID}
+	page, limit, skip := parsePagination(r)
+	total, _ := h.db.FreightCarriers().CountDocuments(r.Context(), filter)
+	cursor, err := h.db.FreightCarriers().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "name", Value: 1}}).SetSkip(skip).SetLimit(limit))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
 	results := make([]models.FreightCarrier, 0)
 	cursor.All(r.Context(), &results) //nolint
-	writeJSON(w, http.StatusOK, results)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": results,
+		"total": total,
+		"page":  page,
+		"pages": (total + limit - 1) / limit,
+	})
 }
 
 func (h *ProcurementHandler) createFreightCarrier(w http.ResponseWriter, r *http.Request) {
@@ -626,10 +668,23 @@ func (h *ProcurementHandler) listHarbours(w http.ResponseWriter, r *http.Request
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	cursor, _ := h.db.Harbours().Find(r.Context(), bson.M{"tenantId": tenantID}, options.Find().SetSort(bson.D{{Key: "name", Value: 1}}))
+	filter := bson.M{"tenantId": tenantID}
+	page, limit, skip := parsePagination(r)
+	total, _ := h.db.Harbours().CountDocuments(r.Context(), filter)
+	cursor, err := h.db.Harbours().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "name", Value: 1}}).SetSkip(skip).SetLimit(limit))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
 	results := make([]models.Harbour, 0)
 	cursor.All(r.Context(), &results) //nolint
-	writeJSON(w, http.StatusOK, results)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": results,
+		"total": total,
+		"page":  page,
+		"pages": (total + limit - 1) / limit,
+	})
 }
 
 func (h *ProcurementHandler) createHarbour(w http.ResponseWriter, r *http.Request) {
@@ -691,10 +746,23 @@ func (h *ProcurementHandler) listContainers(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	cursor, _ := h.db.ProcurementContainers().Find(r.Context(), bson.M{"tenantId": tenantID}, options.Find().SetSort(bson.D{{Key: "name", Value: 1}}))
+	filter := bson.M{"tenantId": tenantID}
+	page, limit, skip := parsePagination(r)
+	total, _ := h.db.ProcurementContainers().CountDocuments(r.Context(), filter)
+	cursor, err := h.db.ProcurementContainers().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "name", Value: 1}}).SetSkip(skip).SetLimit(limit))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
 	results := make([]models.Container, 0)
 	cursor.All(r.Context(), &results) //nolint
-	writeJSON(w, http.StatusOK, results)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": results,
+		"total": total,
+		"page":  page,
+		"pages": (total + limit - 1) / limit,
+	})
 }
 
 func (h *ProcurementHandler) createContainer(w http.ResponseWriter, r *http.Request) {
@@ -757,10 +825,23 @@ func (h *ProcurementHandler) listCountries(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	cursor, _ := h.db.ProcurementCountries().Find(r.Context(), bson.M{"tenantId": tenantID}, options.Find().SetSort(bson.D{{Key: "name", Value: 1}}))
+	filter := bson.M{"tenantId": tenantID}
+	page, limit, skip := parsePagination(r)
+	total, _ := h.db.ProcurementCountries().CountDocuments(r.Context(), filter)
+	cursor, err := h.db.ProcurementCountries().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "name", Value: 1}}).SetSkip(skip).SetLimit(limit))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
 	results := make([]models.Country, 0)
 	cursor.All(r.Context(), &results) //nolint
-	writeJSON(w, http.StatusOK, results)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": results,
+		"total": total,
+		"page":  page,
+		"pages": (total + limit - 1) / limit,
+	})
 }
 
 func (h *ProcurementHandler) createCountry(w http.ResponseWriter, r *http.Request) {
@@ -829,15 +910,22 @@ func (h *ProcurementHandler) listOrders(w http.ResponseWriter, r *http.Request) 
 			bson.M{"orderContents": bson.M{"$regex": q, "$options": "i"}},
 		}
 	}
+	page, limit, skip := parsePagination(r)
+	total, _ := h.db.Orders().CountDocuments(r.Context(), filter)
 	cursor, err := h.db.Orders().Find(r.Context(), filter,
-		options.Find().SetSort(bson.D{{Key: "orderDate", Value: -1}}).SetLimit(500))
+		options.Find().SetSort(bson.D{{Key: "orderDate", Value: -1}}).SetSkip(skip).SetLimit(limit))
 	if err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
 	results := make([]models.Order, 0)
 	cursor.All(r.Context(), &results) //nolint
-	writeJSON(w, http.StatusOK, results)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": results,
+		"total": total,
+		"page":  page,
+		"pages": (total + limit - 1) / limit,
+	})
 }
 
 func (h *ProcurementHandler) createOrder(w http.ResponseWriter, r *http.Request) {
@@ -1102,10 +1190,22 @@ func (h *ProcurementHandler) listOffers(w http.ResponseWriter, r *http.Request) 
 	if stockOnly := r.URL.Query().Get("stock"); stockOnly == "true" {
 		filter["isStockOffer"] = true
 	}
-	cursor, _ := h.db.Offers().Find(r.Context(), filter, options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}))
+	page, limit, skip := parsePagination(r)
+	total, _ := h.db.Offers().CountDocuments(r.Context(), filter)
+	cursor, err := h.db.Offers().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetSkip(skip).SetLimit(limit))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
 	results := make([]models.Offer, 0)
 	cursor.All(r.Context(), &results) //nolint
-	writeJSON(w, http.StatusOK, results)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": results,
+		"total": total,
+		"page":  page,
+		"pages": (total + limit - 1) / limit,
+	})
 }
 
 func (h *ProcurementHandler) createOffer(w http.ResponseWriter, r *http.Request) {
