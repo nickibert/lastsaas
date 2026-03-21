@@ -1,4 +1,4 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { ShoppingCart, Package, Users, Ship, Anchor, Box, Globe, Tag, Gift } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { ordersApi, productsApi, suppliersApi } from '../../../api/procurement';
