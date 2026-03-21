@@ -3,9 +3,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Trash2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { ordersApi, suppliersApi, type Order } from '../../../api/procurement';
+import { useTenant } from '../../../contexts/TenantContext';
 
 export default function OrdersPage() {
   const qc = useQueryClient();
+  const { activeTenant } = useTenant();
+  const enabled = !!activeTenant;
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Partial<Order>>({
@@ -18,11 +21,15 @@ export default function OrdersPage() {
   const { data: orders = [], isLoading } = useQuery({
     queryKey: ['orders', search],
     queryFn: () => ordersApi.list(search || undefined),
+    enabled,
+    throwOnError: false,
   });
 
   const { data: suppliers = [] } = useQuery({
     queryKey: ['suppliers'],
     queryFn: suppliersApi.list,
+    enabled,
+    throwOnError: false,
   });
 
   const createMutation = useMutation({

@@ -3,9 +3,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { suppliersApi, type Supplier } from '../../../api/procurement';
+import { useTenant } from '../../../contexts/TenantContext';
 
 export default function SuppliersPage() {
   const qc = useQueryClient();
+  const { activeTenant } = useTenant();
+  const enabled = !!activeTenant;
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Supplier | null>(null);
   const [form, setForm] = useState<Partial<Supplier>>({ company: '', firstname: '', lastname: '', email: '', origin: '' });
@@ -13,6 +16,8 @@ export default function SuppliersPage() {
   const { data: suppliers = [], isLoading } = useQuery({
     queryKey: ['suppliers'],
     queryFn: suppliersApi.list,
+    enabled,
+    throwOnError: false,
   });
 
   const createMutation = useMutation({

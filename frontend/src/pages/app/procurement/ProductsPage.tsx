@@ -3,9 +3,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { productsApi, goodsGroupsApi, supplierCodesApi, type Product } from '../../../api/procurement';
+import { useTenant } from '../../../contexts/TenantContext';
 
 export default function ProductsPage() {
   const qc = useQueryClient();
+  const { activeTenant } = useTenant();
+  const enabled = !!activeTenant;
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
@@ -14,10 +17,12 @@ export default function ProductsPage() {
   const { data: products = [], isLoading } = useQuery({
     queryKey: ['products', search],
     queryFn: () => productsApi.list(search || undefined),
+    enabled,
+    throwOnError: false,
   });
 
-  const { data: goodsGroups = [] } = useQuery({ queryKey: ['goods-groups'], queryFn: goodsGroupsApi.list });
-  const { data: supplierCodes = [] } = useQuery({ queryKey: ['supplier-codes'], queryFn: () => supplierCodesApi.list() });
+  const { data: goodsGroups = [] } = useQuery({ queryKey: ['goods-groups'], queryFn: goodsGroupsApi.list, enabled, throwOnError: false });
+  const { data: supplierCodes = [] } = useQuery({ queryKey: ['supplier-codes'], queryFn: () => supplierCodesApi.list(), enabled, throwOnError: false });
 
   const createMutation = useMutation({
     mutationFn: productsApi.create,

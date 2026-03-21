@@ -2,11 +2,14 @@ import { Link } from 'react-router-dom';
 import { ShoppingCart, Package, Users, Ship, Anchor, Box, Globe, Tag, Gift } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { ordersApi, productsApi, suppliersApi } from '../../../api/procurement';
+import { useTenant } from '../../../contexts/TenantContext';
 
 export default function ProcurementPage() {
-  const { data: orders = [] } = useQuery({ queryKey: ['orders'], queryFn: () => ordersApi.list() });
-  const { data: products = [] } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() });
-  const { data: suppliers = [] } = useQuery({ queryKey: ['suppliers'], queryFn: suppliersApi.list });
+  const { activeTenant } = useTenant();
+  const enabled = !!activeTenant;
+  const { data: orders = [] } = useQuery({ queryKey: ['orders'], queryFn: () => ordersApi.list(), enabled, throwOnError: false });
+  const { data: products = [] } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list(), enabled, throwOnError: false });
+  const { data: suppliers = [] } = useQuery({ queryKey: ['suppliers'], queryFn: suppliersApi.list, enabled, throwOnError: false });
 
   const tiles = [
     {
