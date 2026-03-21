@@ -217,12 +217,12 @@ func cmdSetup() {
 	database, cfg, cleanup := connectDB()
 	defer cleanup()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	checkCtx, checkCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer checkCancel()
 
 	// Check if already initialized
 	var sys models.SystemConfig
-	err := database.SystemConfig().FindOne(ctx, bson.M{}).Decode(&sys)
+	err := database.SystemConfig().FindOne(checkCtx, bson.M{}).Decode(&sys)
 	if err == nil && sys.Initialized {
 		fmt.Println("System is already initialized.")
 		fmt.Println()
@@ -230,11 +230,11 @@ func cmdSetup() {
 
 		// Look up root tenant owner
 		var rootTenant models.Tenant
-		if err := database.Tenants().FindOne(ctx, bson.M{"isRoot": true}).Decode(&rootTenant); err == nil {
+		if err := database.Tenants().FindOne(checkCtx, bson.M{"isRoot": true}).Decode(&rootTenant); err == nil {
 			var membership models.TenantMembership
-			if err := database.TenantMemberships().FindOne(ctx, bson.M{"tenantId": rootTenant.ID, "role": "owner"}).Decode(&membership); err == nil {
+			if err := database.TenantMemberships().FindOne(checkCtx, bson.M{"tenantId": rootTenant.ID, "role": "owner"}).Decode(&membership); err == nil {
 				var owner models.User
-				if err := database.Users().FindOne(ctx, bson.M{"_id": membership.UserID}).Decode(&owner); err == nil {
+				if err := database.Users().FindOne(checkCtx, bson.M{"_id": membership.UserID}).Decode(&owner); err == nil {
 					fmt.Printf("  Owner:    %s (%s)\n", owner.DisplayName, owner.Email)
 				}
 			}
@@ -275,6 +275,10 @@ func cmdSetup() {
 		fmt.Fprintln(os.Stderr, "Requirements: 10+ characters, uppercase, lowercase, number, special character")
 		os.Exit(1)
 	}
+
+	// Create a fresh context for DB writes (after user input is complete)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	passwordHash, err := passwordService.HashPassword(password)
 	if err != nil {
