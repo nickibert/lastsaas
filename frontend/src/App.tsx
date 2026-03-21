@@ -36,6 +36,7 @@ const HarboursPage = lazy(() => import('./pages/app/procurement/HarboursPage'));
 const ContainersPage = lazy(() => import('./pages/app/procurement/ContainersPage'));
 const CountriesPage = lazy(() => import('./pages/app/procurement/CountriesPage'));
 const OffersPage = lazy(() => import('./pages/app/procurement/OffersPage'));
+const CalendarPage = lazy(() => import('./pages/app/procurement/CalendarPage'));
 const OrderDetailPage = lazy(() => import('./pages/app/procurement/OrderDetailPage'));
 
 // App pages (eager — core experience)
@@ -186,6 +187,7 @@ export default function App() {
                         <Route path="/procurement/containers" element={<Suspense fallback={<LazyFallback />}><ContainersPage /></Suspense>} />
                         <Route path="/procurement/countries" element={<Suspense fallback={<LazyFallback />}><CountriesPage /></Suspense>} />
                         <Route path="/procurement/offers" element={<Suspense fallback={<LazyFallback />}><OffersPage /></Suspense>} />
+                        <Route path="/procurement/calendar" element={<Suspense fallback={<LazyFallback />}><CalendarPage /></Suspense>} />
                         <Route path="/messages" element={<Suspense fallback={<LazyFallback />}><AdminMessagesPage /></Suspense>} />
                       </Route>
 

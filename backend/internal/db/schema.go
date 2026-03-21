@@ -28,6 +28,7 @@ func AllSchemas() []CollectionSchema {
 		harboursSchema(),
 		containersSchema(),
 		countriesSchema(),
+		productPriceListsSchema(),
 		ordersSchema(),
 		orderTasksSchema(),
 		orderPaymentsSchema(),
@@ -786,8 +787,40 @@ func countriesSchema() CollectionSchema {
 				"bsonType": "object",
 				"required": bson.A{"tenantId", "name", "createdAt", "updatedAt"},
 				"properties": bson.M{
+					"tenantId":       bson.M{"bsonType": "objectId"},
+					"name":           bson.M{"bsonType": "string", "minLength": 1, "maxLength": 100},
+					"iso2":           bson.M{"bsonType": "string", "maxLength": 2},
+					"iso3":           bson.M{"bsonType": "string", "maxLength": 3},
+					"isoNumeric":     bson.M{"bsonType": "string", "maxLength": 3},
+					"currency":       bson.M{"bsonType": "string", "maxLength": 100},
+					"currencyCode":   bson.M{"bsonType": "string", "maxLength": 3},
+					"currencySymbol": bson.M{"bsonType": "string", "maxLength": 10},
+					"phoneCode":      bson.M{"bsonType": "string", "maxLength": 15},
+					"region":         bson.M{"bsonType": "string", "maxLength": 100},
+					"capital":        bson.M{"bsonType": "string", "maxLength": 100},
+					"createdAt":      bson.M{"bsonType": "date"},
+					"updatedAt":      bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func productPriceListsSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "product_price_lists",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "productId", "type", "name", "currency", "createdAt", "updatedAt"},
+				"properties": bson.M{
 					"tenantId":  bson.M{"bsonType": "objectId"},
-					"name":      bson.M{"bsonType": "string", "minLength": 1, "maxLength": 50},
+					"productId": bson.M{"bsonType": "objectId"},
+					"type":      bson.M{"bsonType": "string", "enum": bson.A{"EK", "VK"}},
+					"name":      bson.M{"bsonType": "string", "minLength": 1, "maxLength": 100},
+					"price":     bson.M{"bsonType": "double", "minimum": 0},
+					"currency":  bson.M{"bsonType": "string", "minLength": 3, "maxLength": 3},
+					"notes":     bson.M{"bsonType": "string", "maxLength": 500},
 					"createdAt": bson.M{"bsonType": "date"},
 					"updatedAt": bson.M{"bsonType": "date"},
 				},

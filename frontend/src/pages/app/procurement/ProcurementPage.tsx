@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ShoppingCart, Package, Users, Ship, Anchor, Box, Globe, Tag, Gift } from 'lucide-react';
+import { ShoppingCart, Package, Users, Ship, Anchor, Box, Globe, Tag, Gift, CalendarDays } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { ordersApi, productsApi, suppliersApi, freightCarriersApi, harboursApi, containersApi, countriesApi, goodsGroupsApi, offersApi } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
@@ -89,6 +89,14 @@ export default function ProcurementPage() {
       to: '/procurement/offers',
       color: 'text-indigo-400',
       bg: 'bg-indigo-500/20',
+    },
+    {
+      icon: CalendarDays,
+      label: 'Kalender',
+      count: null,
+      to: '/procurement/calendar',
+      color: 'text-violet-400',
+      bg: 'bg-violet-500/20',
     },
   ];
 

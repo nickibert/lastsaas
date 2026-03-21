@@ -87,8 +87,18 @@ func (h *ProcurementHandler) RegisterRoutes(r *mux.Router, authMW mux.Middleware
 	// Countries
 	s.HandleFunc("/countries", h.listCountries).Methods(http.MethodGet)
 	s.HandleFunc("/countries", h.createCountry).Methods(http.MethodPost)
+	s.HandleFunc("/countries/seed", h.seedCountries).Methods(http.MethodPost)
 	s.HandleFunc("/countries/{id}", h.updateCountry).Methods(http.MethodPut)
 	s.HandleFunc("/countries/{id}", h.deleteCountry).Methods(http.MethodDelete)
+
+	// Product price lists
+	s.HandleFunc("/products/{id}/price-lists", h.listProductPriceLists).Methods(http.MethodGet)
+	s.HandleFunc("/products/{id}/price-lists", h.createProductPriceList).Methods(http.MethodPost)
+	s.HandleFunc("/products/{id}/price-lists/{priceListId}", h.updateProductPriceList).Methods(http.MethodPut)
+	s.HandleFunc("/products/{id}/price-lists/{priceListId}", h.deleteProductPriceList).Methods(http.MethodDelete)
+
+	// Calendar
+	s.HandleFunc("/calendar", h.getCalendar).Methods(http.MethodGet)
 
 	// Orders
 	s.HandleFunc("/orders", h.listOrders).Methods(http.MethodGet)
@@ -889,8 +899,60 @@ func (h *ProcurementHandler) updateCountry(w http.ResponseWriter, r *http.Reques
 	var doc models.Country
 	json.NewDecoder(r.Body).Decode(&doc) //nolint
 	h.db.ProcurementCountries().UpdateOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID},
-		bson.M{"$set": bson.M{"name": doc.Name, "updatedAt": time.Now().UTC()}}) //nolint
+		bson.M{"$set": bson.M{
+			"name":           doc.Name,
+			"iso2":           doc.ISO2,
+			"iso3":           doc.ISO3,
+			"isoNumeric":     doc.ISONumeric,
+			"currency":       doc.Currency,
+			"currencyCode":   doc.CurrencyCode,
+			"currencySymbol": doc.CurrencySymbol,
+			"phoneCode":      doc.PhoneCode,
+			"region":         doc.Region,
+			"capital":        doc.Capital,
+			"updatedAt":      time.Now().UTC(),
+		}}) //nolint
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *ProcurementHandler) seedCountries(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	// Only seed if no countries exist yet for this tenant
+	existing, _ := h.db.ProcurementCountries().CountDocuments(r.Context(), bson.M{"tenantId": tenantID})
+	if existing > 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"message": "already seeded", "existing": existing})
+		return
+	}
+	now := time.Now().UTC()
+	docs := make([]any, 0, len(allCountries))
+	for _, c := range allCountries {
+		docs = append(docs, models.Country{
+			ID:             primitive.NewObjectID(),
+			TenantID:       tenantID,
+			Name:           c.Name,
+			ISO2:           c.ISO2,
+			ISO3:           c.ISO3,
+			ISONumeric:     c.ISONumeric,
+			Currency:       c.Currency,
+			CurrencyCode:   c.CurrencyCode,
+			CurrencySymbol: c.CurrencySymbol,
+			PhoneCode:      c.PhoneCode,
+			Region:         c.Region,
+			Capital:        c.Capital,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		})
+	}
+	res, err := h.db.ProcurementCountries().InsertMany(r.Context(), docs)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"inserted": len(res.InsertedIDs)})
 }
 
 func (h *ProcurementHandler) deleteCountry(w http.ResponseWriter, r *http.Request) {
@@ -1442,4 +1504,274 @@ func (h *ProcurementHandler) applyOrderEK(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
+}
+
+// ---------------------------------------------------------------------------
+// Product Price Lists
+// ---------------------------------------------------------------------------
+
+func (h *ProcurementHandler) listProductPriceLists(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	productID, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	filter := bson.M{"tenantId": tenantID, "productId": productID}
+	cursor, err := h.db.ProductPriceLists().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "type", Value: 1}, {Key: "name", Value: 1}}))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	results := make([]models.ProductPriceList, 0)
+	cursor.All(r.Context(), &results) //nolint
+	writeJSON(w, http.StatusOK, results)
+}
+
+func (h *ProcurementHandler) createProductPriceList(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	productID, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var doc models.ProductPriceList
+	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	doc.ID = primitive.NewObjectID()
+	doc.TenantID = tenantID
+	doc.ProductID = productID
+	doc.CreatedAt = time.Now().UTC()
+	doc.UpdatedAt = doc.CreatedAt
+	if _, err := h.db.ProductPriceLists().InsertOne(r.Context(), doc); err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusCreated, doc)
+}
+
+func (h *ProcurementHandler) updateProductPriceList(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	priceListID, ok := parseID(r, "priceListId")
+	if !ok {
+		http.Error(w, "invalid priceListId", http.StatusBadRequest)
+		return
+	}
+	var doc models.ProductPriceList
+	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	h.db.ProductPriceLists().UpdateOne(r.Context(), bson.M{"_id": priceListID, "tenantId": tenantID},
+		bson.M{"$set": bson.M{
+			"type":      doc.Type,
+			"name":      doc.Name,
+			"price":     doc.Price,
+			"currency":  doc.Currency,
+			"validFrom": doc.ValidFrom,
+			"validTo":   doc.ValidTo,
+			"notes":     doc.Notes,
+			"updatedAt": time.Now().UTC(),
+		}}) //nolint
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *ProcurementHandler) deleteProductPriceList(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	priceListID, ok := parseID(r, "priceListId")
+	if !ok {
+		http.Error(w, "invalid priceListId", http.StatusBadRequest)
+		return
+	}
+	h.db.ProductPriceLists().DeleteOne(r.Context(), bson.M{"_id": priceListID, "tenantId": tenantID}) //nolint
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------------------
+// Calendar
+// ---------------------------------------------------------------------------
+
+type calendarTask struct {
+	ID          string  `json:"id"`
+	OrderID     string  `json:"orderId"`
+	OrderNumber string  `json:"orderNumber"`
+	Text        string  `json:"text"`
+	DueDate     string  `json:"dueDate"`
+	DoneAt      *string `json:"doneAt"`
+}
+
+type calendarArrival struct {
+	OrderID         string `json:"orderId"`
+	OrderNumber     string `json:"orderNumber"`
+	EstimatedDate   string `json:"estimatedDate"`
+	ActualDate      string `json:"actualDate,omitempty"`
+	SupplierName    string `json:"supplierName,omitempty"`
+}
+
+func (h *ProcurementHandler) getCalendar(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	fromStr := r.URL.Query().Get("from")
+	toStr := r.URL.Query().Get("to")
+	var from, to time.Time
+	var err error
+	if fromStr != "" {
+		from, err = time.Parse("2006-01-02", fromStr)
+		if err != nil {
+			http.Error(w, "invalid from date", http.StatusBadRequest)
+			return
+		}
+	} else {
+		now := time.Now().UTC()
+		from = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	}
+	if toStr != "" {
+		to, err = time.Parse("2006-01-02", toStr)
+		if err != nil {
+			http.Error(w, "invalid to date", http.StatusBadRequest)
+			return
+		}
+		to = to.Add(24 * time.Hour) // inclusive
+	} else {
+		to = from.AddDate(0, 1, 0)
+	}
+
+	// Fetch tasks with dueDate in range
+	taskCursor, err := h.db.OrderTasks().Find(r.Context(), bson.M{
+		"tenantId": tenantID,
+		"dueDate":  bson.M{"$gte": from, "$lt": to},
+	})
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	rawTasks := make([]models.OrderTask, 0)
+	taskCursor.All(r.Context(), &rawTasks) //nolint
+
+	// Collect orderIds for enrichment
+	orderIDSet := map[primitive.ObjectID]struct{}{}
+	for _, t := range rawTasks {
+		orderIDSet[t.OrderID] = struct{}{}
+	}
+
+	// Fetch orders with estimatedArrival or arrival in range
+	arrivalCursor, err := h.db.Orders().Find(r.Context(), bson.M{
+		"tenantId": tenantID,
+		"$or": bson.A{
+			bson.M{"estimatedArrival": bson.M{"$gte": from, "$lt": to}},
+			bson.M{"arrival": bson.M{"$gte": from, "$lt": to}},
+		},
+	})
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	arrivalOrders := make([]models.Order, 0)
+	arrivalCursor.All(r.Context(), &arrivalOrders) //nolint
+	for _, o := range arrivalOrders {
+		orderIDSet[o.ID] = struct{}{}
+	}
+
+	// Fetch all needed orders in one query
+	orderIDs := make([]primitive.ObjectID, 0, len(orderIDSet))
+	for id := range orderIDSet {
+		orderIDs = append(orderIDs, id)
+	}
+	orderMap := map[primitive.ObjectID]models.Order{}
+	if len(orderIDs) > 0 {
+		oCursor, err2 := h.db.Orders().Find(r.Context(), bson.M{"_id": bson.M{"$in": orderIDs}})
+		if err2 == nil {
+			var orders []models.Order
+			oCursor.All(r.Context(), &orders) //nolint
+			for _, o := range orders {
+				orderMap[o.ID] = o
+			}
+		}
+	}
+
+	// Optionally fetch supplier names
+	supplierIDs := make([]primitive.ObjectID, 0)
+	for _, o := range orderMap {
+		if o.SupplierID != nil {
+			supplierIDs = append(supplierIDs, *o.SupplierID)
+		}
+	}
+	supplierMap := map[primitive.ObjectID]string{}
+	if len(supplierIDs) > 0 {
+		sCursor, err2 := h.db.Suppliers().Find(r.Context(), bson.M{"_id": bson.M{"$in": supplierIDs}})
+		if err2 == nil {
+			var suppliers []models.Supplier
+			sCursor.All(r.Context(), &suppliers) //nolint
+			for _, s := range suppliers {
+				supplierMap[s.ID] = s.Company
+			}
+		}
+	}
+
+	// Build response tasks
+	tasks := make([]calendarTask, 0, len(rawTasks))
+	for _, t := range rawTasks {
+		ct := calendarTask{
+			ID:      t.ID.Hex(),
+			OrderID: t.OrderID.Hex(),
+			Text:    t.Text,
+		}
+		if t.DueDate != nil {
+			ct.DueDate = t.DueDate.Format("2006-01-02")
+		}
+		if t.DoneAt != nil {
+			s := t.DoneAt.Format(time.RFC3339)
+			ct.DoneAt = &s
+		}
+		if o, ok2 := orderMap[t.OrderID]; ok2 {
+			ct.OrderNumber = o.OrderNumber
+		}
+		tasks = append(tasks, ct)
+	}
+
+	// Build response arrivals
+	arrivals := make([]calendarArrival, 0, len(arrivalOrders))
+	for _, o := range arrivalOrders {
+		ca := calendarArrival{
+			OrderID:     o.ID.Hex(),
+			OrderNumber: o.OrderNumber,
+		}
+		if o.EstimatedArrival != nil {
+			ca.EstimatedDate = o.EstimatedArrival.Format("2006-01-02")
+		}
+		if o.Arrival != nil {
+			ca.ActualDate = o.Arrival.Format("2006-01-02")
+		}
+		if o.SupplierID != nil {
+			ca.SupplierName = supplierMap[*o.SupplierID]
+		}
+		arrivals = append(arrivals, ca)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tasks":    tasks,
+		"arrivals": arrivals,
+	})
 }

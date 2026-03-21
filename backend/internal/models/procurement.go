@@ -53,6 +53,12 @@ type GoodsGroup struct {
 // Product
 // ---------------------------------------------------------------------------
 
+type ProductAttribute struct {
+	Key   string `json:"key" bson:"key" validate:"required,min=1,max=100"`
+	Value string `json:"value" bson:"value" validate:"max=500"`
+	Unit  string `json:"unit,omitempty" bson:"unit,omitempty" validate:"omitempty,max=30"`
+}
+
 type Product struct {
 	ID             primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
 	TenantID       primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
@@ -78,6 +84,9 @@ type Product struct {
 	// Pricing
 	LastEK     float64    `json:"lastEk" bson:"lastEk" validate:"min=0"`
 	LastEKDate *time.Time `json:"lastEkDate,omitempty" bson:"lastEkDate,omitempty"`
+	// PIM: Tags and structured attributes
+	Tags       []string           `json:"tags,omitempty" bson:"tags,omitempty"`
+	Attributes []ProductAttribute `json:"attributes,omitempty" bson:"attributes,omitempty"`
 	// Custom fields (legacy userdef01-10)
 	UserDef01 string `json:"userDef01" bson:"userDef01"`
 	UserDef02 string `json:"userDef02" bson:"userDef02"`
@@ -94,6 +103,21 @@ type Product struct {
 	LegacyID  int    `json:"legacyId,omitempty" bson:"legacyId,omitempty"`
 	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt" bson:"updatedAt"`
+}
+
+type ProductPriceList struct {
+	ID        primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
+	TenantID  primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
+	ProductID primitive.ObjectID  `json:"productId" bson:"productId" validate:"required"`
+	Type      string              `json:"type" bson:"type" validate:"required,oneof=EK VK"`
+	Name      string              `json:"name" bson:"name" validate:"required,min=1,max=100"`
+	Price     float64             `json:"price" bson:"price" validate:"min=0"`
+	Currency  string              `json:"currency" bson:"currency" validate:"required,len=3"`
+	ValidFrom *time.Time          `json:"validFrom,omitempty" bson:"validFrom,omitempty"`
+	ValidTo   *time.Time          `json:"validTo,omitempty" bson:"validTo,omitempty"`
+	Notes     string              `json:"notes,omitempty" bson:"notes,omitempty" validate:"omitempty,max=500"`
+	CreatedAt time.Time           `json:"createdAt" bson:"createdAt"`
+	UpdatedAt time.Time           `json:"updatedAt" bson:"updatedAt"`
 }
 
 // ---------------------------------------------------------------------------
@@ -160,12 +184,21 @@ type CustomerFreightCarrier struct {
 }
 
 type Country struct {
-	ID        primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	TenantID  primitive.ObjectID `json:"tenantId" bson:"tenantId" validate:"required"`
-	Name      string             `json:"name" bson:"name" validate:"required,min=1,max=50"`
-	LegacyID  int                `json:"legacyId,omitempty" bson:"legacyId,omitempty"`
-	CreatedAt time.Time          `json:"createdAt" bson:"createdAt"`
-	UpdatedAt time.Time          `json:"updatedAt" bson:"updatedAt"`
+	ID             primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	TenantID       primitive.ObjectID `json:"tenantId" bson:"tenantId" validate:"required"`
+	Name           string             `json:"name" bson:"name" validate:"required,min=1,max=100"`
+	ISO2           string             `json:"iso2,omitempty" bson:"iso2,omitempty" validate:"omitempty,len=2"`
+	ISO3           string             `json:"iso3,omitempty" bson:"iso3,omitempty" validate:"omitempty,len=3"`
+	ISONumeric     string             `json:"isoNumeric,omitempty" bson:"isoNumeric,omitempty" validate:"omitempty,max=3"`
+	Currency       string             `json:"currency,omitempty" bson:"currency,omitempty" validate:"omitempty,max=100"`
+	CurrencyCode   string             `json:"currencyCode,omitempty" bson:"currencyCode,omitempty" validate:"omitempty,max=3"`
+	CurrencySymbol string             `json:"currencySymbol,omitempty" bson:"currencySymbol,omitempty" validate:"omitempty,max=10"`
+	PhoneCode      string             `json:"phoneCode,omitempty" bson:"phoneCode,omitempty" validate:"omitempty,max=15"`
+	Region         string             `json:"region,omitempty" bson:"region,omitempty" validate:"omitempty,max=100"`
+	Capital        string             `json:"capital,omitempty" bson:"capital,omitempty" validate:"omitempty,max=100"`
+	LegacyID       int                `json:"legacyId,omitempty" bson:"legacyId,omitempty"`
+	CreatedAt      time.Time          `json:"createdAt" bson:"createdAt"`
+	UpdatedAt      time.Time          `json:"updatedAt" bson:"updatedAt"`
 }
 
 // ---------------------------------------------------------------------------

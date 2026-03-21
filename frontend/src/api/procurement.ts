@@ -50,6 +50,8 @@ export interface Product {
   vpe: number;
   lastEk: number;
   lastEkDate?: string;
+  tags?: string[];
+  attributes?: ProductAttribute[];
   userDef01: string;
   userDef02: string;
   userDef03: string;
@@ -86,6 +88,54 @@ export interface Container {
 export interface Country {
   id: string;
   name: string;
+  iso2?: string;
+  iso3?: string;
+  isoNumeric?: string;
+  currency?: string;
+  currencyCode?: string;
+  currencySymbol?: string;
+  phoneCode?: string;
+  region?: string;
+  capital?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ProductAttribute {
+  key: string;
+  value: string;
+  unit?: string;
+}
+
+export interface ProductPriceList {
+  id: string;
+  productId: string;
+  type: 'EK' | 'VK';
+  name: string;
+  price: number;
+  currency: string;
+  validFrom?: string;
+  validTo?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CalendarTask {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  text: string;
+  dueDate: string;
+  doneAt?: string;
+}
+
+export interface CalendarArrival {
+  orderId: string;
+  orderNumber: string;
+  estimatedDate: string;
+  actualDate?: string;
+  supplierName?: string;
 }
 
 export interface OrderProduct {
@@ -274,6 +324,21 @@ export const countriesApi = {
   create: (data: Partial<Country>) => api.post<Country>(`${BASE}/countries`, data).then(r => r.data),
   update: (id: string, data: Partial<Country>) => api.put(`${BASE}/countries/${id}`, data),
   delete: (id: string) => api.delete(`${BASE}/countries/${id}`),
+  seed: () => api.post<{ inserted?: number; existing?: number; message?: string }>(`${BASE}/countries/seed`).then(r => r.data),
+};
+
+// Product price lists
+export const productPriceListsApi = {
+  list: (productId: string) => api.get<ProductPriceList[]>(`${BASE}/products/${productId}/price-lists`).then(r => r.data),
+  create: (productId: string, data: Partial<ProductPriceList>) => api.post<ProductPriceList>(`${BASE}/products/${productId}/price-lists`, data).then(r => r.data),
+  update: (productId: string, id: string, data: Partial<ProductPriceList>) => api.put(`${BASE}/products/${productId}/price-lists/${id}`, data),
+  delete: (productId: string, id: string) => api.delete(`${BASE}/products/${productId}/price-lists/${id}`),
+};
+
+// Calendar
+export const calendarApi = {
+  get: (from?: string, to?: string) =>
+    api.get<{ tasks: CalendarTask[]; arrivals: CalendarArrival[] }>(`${BASE}/calendar`, { params: { from, to } }).then(r => r.data),
 };
 
 // Orders

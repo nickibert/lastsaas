@@ -518,6 +518,10 @@ func (m *MongoDB) ProcurementCountries() *mongo.Collection {
 	return m.Database.Collection("countries")
 }
 
+func (m *MongoDB) ProductPriceLists() *mongo.Collection {
+	return m.Database.Collection("product_price_lists")
+}
+
 func (m *MongoDB) Orders() *mongo.Collection {
 	return m.Database.Collection("orders")
 }
