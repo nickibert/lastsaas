@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Save, Plus, Trash2, Check, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  ordersApi, suppliersApi, containersApi, harboursApi, freightCarriersApi,
+  ordersApi, suppliersApi, productsApi, containersApi, harboursApi, freightCarriersApi,
   type Order, type OrderProduct, type OrderFreight, type OrderTask, type OrderPayment, type Product,
 } from '../../../api/procurement';
 import { ProductSearch } from '../../../components/ProductSearch';
@@ -76,6 +76,19 @@ export default function OrderDetailPage() {
     setDraft(order);
     setDraftInit(true);
   }
+
+  // Load product names for all productIds in the order when it first loads
+  useEffect(() => {
+    if (!order) return;
+    const ids = ((order.products ?? []) as OrderProduct[])
+      .map(p => p.productId)
+      .filter((id): id is string => !!id);
+    if (ids.length === 0) return;
+    ids.forEach(pid => {
+      productsApi.get(pid).then(p => setProductName(pid, p)).catch(() => {});
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order?.id]);
 
   const updateMutation = useMutation({
     mutationFn: (data: Partial<Order>) => ordersApi.update(id!, data),

@@ -12,6 +12,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"log"
@@ -21,27 +22,11 @@ import (
 	"strings"
 	"time"
 
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
-
-// insertedCount extracts the number of successfully inserted documents from
-// an InsertMany result, even when a BulkWriteException accompanies it
-// (which happens with SetOrdered(false) and partial failures).
-func insertedCount(res *mongo.InsertManyResult, err error) int {
-	if err == nil {
-		return len(res.InsertedIDs)
-	}
-	if bwe, ok := err.(mongo.BulkWriteException); ok {
-		// BulkWriteException still carries a valid InsertedIDs list
-		_ = bwe
-		if res != nil {
-			return len(res.InsertedIDs)
-		}
-	}
-	return 0
-}
 
 // ---------------------------------------------------------------------------
 // CLI flags
@@ -230,17 +215,29 @@ func splitTuples(s string) []string {
 // ---------------------------------------------------------------------------
 
 type IDMap struct {
-	m map[string]primitive.ObjectID
+	tenantID primitive.ObjectID
+	m        map[string]primitive.ObjectID
 }
 
-func newIDMap() *IDMap { return &IDMap{m: make(map[string]primitive.ObjectID)} }
+func newIDMap(tenantID primitive.ObjectID) *IDMap {
+	return &IDMap{tenantID: tenantID, m: make(map[string]primitive.ObjectID)}
+}
+
+// deterministicID returns a stable ObjectID derived from tenantID+table+legacyID
+// so that re-running the migration produces the same IDs and upserts correctly.
+func deterministicID(tenantID primitive.ObjectID, table, legacyID string) primitive.ObjectID {
+	h := sha256.Sum256([]byte(tenantID.Hex() + ":" + table + ":" + legacyID))
+	var oid primitive.ObjectID
+	copy(oid[:], h[:12])
+	return oid
+}
 
 func (im *IDMap) get(table, legacyID string) primitive.ObjectID {
 	key := table + ":" + legacyID
 	if id, ok := im.m[key]; ok {
 		return id
 	}
-	id := primitive.NewObjectID()
+	id := deterministicID(im.tenantID, table, legacyID)
 	im.m[key] = id
 	return id
 }
@@ -306,7 +303,7 @@ func nowUTC() time.Time { return time.Now().UTC() }
 // ---------------------------------------------------------------------------
 
 func importData(ctx context.Context, db *mongo.Database, tenantID primitive.ObjectID, rows map[string][]Row, dryRun bool) {
-	idMap := newIDMap()
+	idMap := newIDMap(tenantID)
 	now := nowUTC()
 
 	type doc = map[string]any
@@ -329,19 +326,21 @@ func importData(ctx context.Context, db *mongo.Database, tenantID primitive.Obje
 				end = len(docs)
 			}
 			batch := docs[start:end]
-			ifaces := make([]any, len(batch))
+			models := make([]mongo.WriteModel, len(batch))
 			for i, d := range batch {
-				ifaces[i] = d
+				models[i] = mongo.NewReplaceOneModel().
+					SetFilter(bson.M{"_id": d["_id"]}).
+					SetReplacement(d).
+					SetUpsert(true)
 			}
-			res, err := db.Collection(collection).InsertMany(ctx, ifaces, options.InsertMany().SetOrdered(false))
-			n := insertedCount(res, err)
-			total += n
+			res, err := db.Collection(collection).BulkWrite(ctx, models, options.BulkWrite().SetOrdered(false))
 			if err != nil {
-				skipped := len(batch) - n
-				log.Printf("  batch %d-%d: inserted %d, skipped %d — %v", start, end, n, skipped, err)
+				log.Printf("  batch %d-%d ERROR: %v", start, end, err)
+			} else {
+				total += int(res.UpsertedCount + res.ModifiedCount + res.InsertedCount)
 			}
 		}
-		log.Printf("  inserted %d total", total)
+		log.Printf("  upserted %d total", total)
 	}
 
 	// --- suppliers ---
