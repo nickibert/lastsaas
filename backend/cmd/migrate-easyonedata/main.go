@@ -135,6 +135,9 @@ func tableColumns(table string) []string {
 			"thc_eur", "isps_eur", "bl_doc_fee_eur", "follow_up_fees_oldb_eur",
 			"customs_clearance_eur", "customs_eur", "customs_percent", "ztn"},
 		"products_supplier": {"products_id", "supplier_id"},
+		"tasks":      {"task_id", "date_id", "plus", "text"},
+		"tasks_done": {"id", "task_id", "orders_id", "user_id"},
+		"tasks_todo": {"task_id", "user_id", "orders_id"},
 	}
 	return cols[table]
 }
@@ -674,6 +677,89 @@ func importData(ctx context.Context, db *mongo.Database, tenantID primitive.Obje
 			docs = append(docs, d)
 		}
 		insertAll("order_payments", docs)
+	}
+
+	// --- task_templates ---
+	// tasks.date_id: 1=order_date (phase 1), 2=shipping_date (phase 2), 3=arrival (phase 2)
+	{
+		var docs []doc
+		for _, r := range rows["tasks"] {
+			phase := 1
+			if r["date_id"] == "2" || r["date_id"] == "3" {
+				phase = 2
+			}
+			docs = append(docs, doc{
+				"_id":       idMap.get("task_template", r["task_id"]),
+				"tenantId":  tenantID,
+				"text":      truncate(r["text"], 500),
+				"daysAfter": parseInt(r["plus"]),
+				"phase":     phase,
+				"legacyId":  parseInt(r["task_id"]),
+				"createdAt": now,
+				"updatedAt": now,
+			})
+		}
+		insertAll("task_templates", docs)
+	}
+
+	// --- order_tasks (from tasks_done and tasks_todo) ---
+	// Build task text lookup: task_id -> text
+	taskText := make(map[string]string)
+	for _, r := range rows["tasks"] {
+		taskText[r["task_id"]] = r["text"]
+	}
+	// Deduplicate tasks_done: (task_id, orders_id) -> first record wins
+	type taskOrderKey struct{ taskID, ordersID string }
+	doneSet := make(map[taskOrderKey]bool)
+	{
+		var docs []doc
+		for _, r := range rows["tasks_done"] {
+			key := taskOrderKey{r["task_id"], r["orders_id"]}
+			if doneSet[key] {
+				continue // already added this (task, order) combination
+			}
+			doneSet[key] = true
+			text := taskText[r["task_id"]]
+			if text == "" {
+				continue
+			}
+			doneAt := now
+			docs = append(docs, doc{
+				"_id":       idMap.get("order_task_done", r["task_id"]+":"+r["orders_id"]),
+				"tenantId":  tenantID,
+				"orderId":   idMap.get("order", r["orders_id"]),
+				"text":      truncate(text, 500),
+				"doneAt":    &doneAt,
+				"legacyId":  parseInt(r["task_id"]),
+				"createdAt": now,
+				"updatedAt": now,
+			})
+		}
+		insertAll("order_tasks", docs)
+	}
+	// tasks_todo: pending tasks not already present as done
+	{
+		var docs []doc
+		for _, r := range rows["tasks_todo"] {
+			key := taskOrderKey{r["task_id"], r["orders_id"]}
+			if doneSet[key] {
+				continue // already migrated as completed
+			}
+			text := taskText[r["task_id"]]
+			if text == "" {
+				continue
+			}
+			docs = append(docs, doc{
+				"_id":       idMap.get("order_task_todo", r["task_id"]+":"+r["orders_id"]),
+				"tenantId":  tenantID,
+				"orderId":   idMap.get("order", r["orders_id"]),
+				"text":      truncate(text, 500),
+				"legacyId":  parseInt(r["task_id"]),
+				"createdAt": now,
+				"updatedAt": now,
+			})
+		}
+		insertAll("order_tasks", docs)
 	}
 }
 
