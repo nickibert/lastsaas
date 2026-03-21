@@ -244,14 +244,14 @@ export default function OrderDetailPage() {
     const totalPaymentFees = payments.reduce((s, p) => s + p.paymentFees, 0);
 
     const warenwertUSD = orderSumUSD - discount;
-    const warenwertEUR = warenwertUSD * dollarRateAvg;
+    const warenwertEUR = dollarRateAvg > 0 ? warenwertUSD / dollarRateAvg : 0;
 
     // Freight costs
     const f = draft.freight as Partial<OrderFreight> | undefined;
     const fRate = (f?.dollarRate ?? 0) > 0 ? (f?.dollarRate ?? 0) : dollarRateAvg;
     const totalSeaUSD = (f?.seaFreightUsd ?? 0) + (f?.emergencyBunkerSurchargeUsd ?? 0) +
       (f?.peakSeasonSurchargeUsd ?? 0) + (f?.suezCanalAddonUsd ?? 0) + (f?.dangerPayUsd ?? 0);
-    const seaFreightEUR = totalSeaUSD * fRate;
+    const seaFreightEUR = fRate > 0 ? totalSeaUSD / fRate : 0;
     const freightageEUR = (f?.freightageEur ?? 0) > 0 ? (f?.freightageEur ?? 0) : (f?.preFreightageEur ?? 0);
     const portFeesEUR = (f?.thcEur ?? 0) + (f?.ispsEur ?? 0) + (f?.blDocFeeEur ?? 0) + (f?.followUpFeesEur ?? 0);
     const customsEUR = (f?.customsClearanceEur ?? 0) + (f?.customsEur ?? 0);
@@ -544,12 +544,12 @@ export default function OrderDetailPage() {
                   </div>
                 )}
                 <div className="flex justify-between text-dark-300">
-                  <span>Warenwert (netto) × {calcEK.dollarRateAvg.toFixed(4)}</span>
+                  <span>Warenwert (netto) ÷ {calcEK.dollarRateAvg.toFixed(4)}</span>
                   <span className="font-mono">{calcEK.warenwertEUR.toFixed(2)} EUR</span>
                 </div>
                 <div className="border-t border-dark-700 my-1" />
                 <div className="flex justify-between text-dark-300">
-                  <span>Seefracht ({calcEK.totalSeaUSD.toFixed(2)} USD) × {((draft.freight as Partial<OrderFreight>)?.dollarRate ?? 0) > 0 ? ((draft.freight as Partial<OrderFreight>)?.dollarRate ?? 0).toFixed(4) : calcEK.dollarRateAvg.toFixed(4)}</span>
+                  <span>Seefracht ({calcEK.totalSeaUSD.toFixed(2)} USD) ÷ {((draft.freight as Partial<OrderFreight>)?.dollarRate ?? 0) > 0 ? ((draft.freight as Partial<OrderFreight>)?.dollarRate ?? 0).toFixed(4) : calcEK.dollarRateAvg.toFixed(4)}</span>
                   <span className="font-mono">{calcEK.seaFreightEUR.toFixed(2)} EUR</span>
                 </div>
                 <div className="flex justify-between text-dark-300">
