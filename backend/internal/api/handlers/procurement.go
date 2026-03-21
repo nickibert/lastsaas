@@ -444,7 +444,7 @@ func (h *ProcurementHandler) listProducts(w http.ResponseWriter, r *http.Request
 			bson.M{"ean": bson.M{"$regex": q, "$options": "i"}},
 		}
 	}
-	cursor, err := h.db.Products().Find(r.Context(), filter, options.Find().SetSort(bson.D{{Key: "nameShort", Value: 1}}).SetLimit(200))
+	cursor, err := h.db.Products().Find(r.Context(), filter, options.Find().SetSort(bson.D{{Key: "nameShort", Value: 1}}).SetLimit(10000))
 	if err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
@@ -511,6 +511,8 @@ func (h *ProcurementHandler) updateProduct(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
+	doc.ID = id
+	doc.TenantID = tenantID
 	doc.UpdatedAt = time.Now().UTC()
 	h.db.Products().UpdateOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID},
 		bson.M{"$set": doc}) //nolint
@@ -1137,6 +1139,8 @@ func (h *ProcurementHandler) updateOffer(w http.ResponseWriter, r *http.Request)
 	}
 	var doc models.Offer
 	json.NewDecoder(r.Body).Decode(&doc) //nolint
+	doc.ID = id
+	doc.TenantID = tenantID
 	doc.UpdatedAt = time.Now().UTC()
 	h.db.Offers().UpdateOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID},
 		bson.M{"$set": doc}) //nolint

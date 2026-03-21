@@ -304,16 +304,26 @@ func importData(ctx context.Context, db *mongo.Database, tenantID primitive.Obje
 			log.Printf("  sample: %s", sample)
 			return
 		}
-		ifaces := make([]any, len(docs))
-		for i, d := range docs {
-			ifaces[i] = d
+		const batchSize = 500
+		total := 0
+		for start := 0; start < len(docs); start += batchSize {
+			end := start + batchSize
+			if end > len(docs) {
+				end = len(docs)
+			}
+			batch := docs[start:end]
+			ifaces := make([]any, len(batch))
+			for i, d := range batch {
+				ifaces[i] = d
+			}
+			res, err := db.Collection(collection).InsertMany(ctx, ifaces, options.InsertMany().SetOrdered(false))
+			if err != nil {
+				log.Printf("  batch %d-%d ERROR: %v", start, end, err)
+			} else {
+				total += len(res.InsertedIDs)
+			}
 		}
-		res, err := db.Collection(collection).InsertMany(ctx, ifaces, options.InsertMany().SetOrdered(false))
-		if err != nil {
-			log.Printf("  ERROR: %v", err)
-		} else {
-			log.Printf("  inserted %d", len(res.InsertedIDs))
-		}
+		log.Printf("  inserted %d total", total)
 	}
 
 	// --- suppliers ---
