@@ -475,16 +475,12 @@ func (h *ProcurementHandler) listProducts(w http.ResponseWriter, r *http.Request
 			bson.M{"ean": bson.M{"$regex": q, "$options": "i"}},
 		}
 	}
-	const pageSize int64 = 50
-	page := int64(1)
-	if p, err := strconv.ParseInt(r.URL.Query().Get("page"), 10, 64); err == nil && p > 0 {
-		page = p
-	}
+	page, pageSize, skip := parsePagination(r)
 	total, _ := h.db.Products().CountDocuments(r.Context(), filter)
 	cursor, err := h.db.Products().Find(r.Context(), filter,
 		options.Find().
 			SetSort(bson.D{{Key: "nameShort", Value: 1}}).
-			SetSkip((page-1)*pageSize).
+			SetSkip(skip).
 			SetLimit(pageSize))
 	if err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
