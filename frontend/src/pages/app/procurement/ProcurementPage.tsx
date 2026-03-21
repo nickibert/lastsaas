@@ -9,7 +9,6 @@ export default function ProcurementPage() {
   const enabled = !!activeTenant;
   const { data: orders = [] } = useQuery({ queryKey: ['orders'], queryFn: () => ordersApi.list(), enabled, throwOnError: false });
   const { data: productsData } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list(), enabled, throwOnError: false });
-  const products = productsData?.items ?? [];
   const { data: suppliers = [] } = useQuery({ queryKey: ['suppliers'], queryFn: suppliersApi.list, enabled, throwOnError: false });
 
   const tiles = [
@@ -24,7 +23,7 @@ export default function ProcurementPage() {
     {
       icon: Package,
       label: 'Produkte',
-      count: products.length,
+      count: productsData?.total ?? null,
       to: '/procurement/products',
       color: 'text-accent-cyan',
       bg: 'bg-accent-cyan/20',

@@ -5,8 +5,9 @@ import { ArrowLeft, Save, Plus, Trash2, Check, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   ordersApi, suppliersApi, productsApi, containersApi, harboursApi, freightCarriersApi,
-  type Order, type OrderProduct, type OrderFreight, type OrderTask, type OrderPayment,
+  type Order, type OrderProduct, type OrderFreight, type OrderTask, type OrderPayment, type Product,
 } from '../../../api/procurement';
+import { ProductSearch } from '../../../components/ProductSearch';
 import { useTenant } from '../../../contexts/TenantContext';
 
 const inputCls = 'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm focus:outline-none focus:border-primary-500';
@@ -58,8 +59,9 @@ export default function OrderDetailPage() {
   });
 
   const { data: suppliers = [] } = useQuery({ queryKey: ['suppliers'], queryFn: suppliersApi.list, enabled, throwOnError: false });
-  const { data: productsData } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list(), enabled, throwOnError: false });
-  const products = productsData?.items ?? [];
+  // productNames caches id→name for display in order product rows
+  const [productNames, setProductNames] = useState<Record<string, string>>({});
+  const setProductName = (id: string, p: Product) => setProductNames(prev => ({ ...prev, [id]: p.nameShort }));
   const { data: containers = [] } = useQuery({ queryKey: ['containers'], queryFn: containersApi.list, enabled, throwOnError: false });
   const { data: harbours = [] } = useQuery({ queryKey: ['harbours'], queryFn: harboursApi.list, enabled, throwOnError: false });
   const { data: freightCarriers = [] } = useQuery({ queryKey: ['freight-carriers'], queryFn: freightCarriersApi.list, enabled, throwOnError: false });
@@ -226,12 +228,12 @@ export default function OrderDetailPage() {
               )}
               {orderProducts.map((op, idx) => (
                 <tr key={idx} className="hover:bg-dark-800/20">
-                  <td className="py-2 pr-3">
-                    <select value={op.productId} onChange={e => updateProduct(idx, 'productId', e.target.value)}
-                      className="w-full px-2 py-1 bg-dark-800 border border-dark-700 rounded text-white text-sm focus:outline-none focus:border-primary-500 min-w-[160px]">
-                      <option value="">— auswählen —</option>
-                      {products.map(p => <option key={p.id} value={p.id}>{p.nameShort}</option>)}
-                    </select>
+                  <td className="py-2 pr-3 min-w-[200px]">
+                    <ProductSearch
+                      value={op.productId}
+                      currentName={op.productId ? (productNames[op.productId] ?? op.productId) : undefined}
+                      onChange={(id, p) => { updateProduct(idx, 'productId', id); setProductName(id, p); }}
+                    />
                   </td>
                   <td className="py-2 pr-3">
                     <input type="number" step="1" min="1" value={op.quantity}

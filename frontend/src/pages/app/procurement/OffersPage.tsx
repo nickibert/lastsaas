@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
-import { offersApi, suppliersApi, productsApi, type Offer } from '../../../api/procurement';
+import { offersApi, suppliersApi, type Offer } from '../../../api/procurement';
+import { ProductSearch } from '../../../components/ProductSearch';
 import { useTenant } from '../../../contexts/TenantContext';
 
 export default function OffersPage() {
@@ -27,13 +28,7 @@ export default function OffersPage() {
     throwOnError: false,
   });
 
-  const { data: productsData } = useQuery({
-    queryKey: ['products'],
-    queryFn: () => productsApi.list(),
-    enabled,
-    throwOnError: false,
-  });
-  const products = productsData?.items ?? [];
+  const [selectedProductName, setSelectedProductName] = useState<string | undefined>();
 
   const createMutation = useMutation({
     mutationFn: offersApi.create,
@@ -60,7 +55,6 @@ export default function OffersPage() {
   };
 
   const supplierName = (id?: string) => suppliers.find(s => s.id === id)?.company ?? '—';
-  const productName = (id?: string) => products.find(p => p.id === id)?.nameShort ?? '—';
 
   return (
     <div className="space-y-6">
@@ -97,11 +91,12 @@ export default function OffersPage() {
             </div>
             <div>
               <label className="block text-sm text-dark-400 mb-1">Produkt</label>
-              <select value={form.productId ?? ''} onChange={e => setForm(f => ({ ...f, productId: e.target.value || undefined }))}
-                className="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white focus:outline-none focus:border-primary-500">
-                <option value="">— auswählen —</option>
-                {products.map(p => <option key={p.id} value={p.id}>{p.nameShort}</option>)}
-              </select>
+              <ProductSearch
+                value={form.productId}
+                currentName={selectedProductName}
+                onChange={(id, p) => { setForm(f => ({ ...f, productId: id })); setSelectedProductName(p.nameShort); }}
+                className="w-full"
+              />
             </div>
             <div>
               <label className="block text-sm text-dark-400 mb-1">Preis (USD)</label>
@@ -160,7 +155,7 @@ export default function OffersPage() {
                 <tr key={o.id} className="hover:bg-dark-800/30">
                   <td className="px-4 py-3 text-white text-sm font-medium">{o.nameShort}</td>
                   <td className="px-4 py-3 text-dark-300 text-sm">{supplierName(o.supplierId)}</td>
-                  <td className="px-4 py-3 text-dark-300 text-sm">{productName(o.productId)}</td>
+                  <td className="px-4 py-3 text-dark-300 text-sm">{o.productId ? '✓ verknüpft' : '—'}</td>
                   <td className="px-4 py-3 text-right text-dark-300 text-sm font-mono">
                     {o.priceUsd.toLocaleString('de-DE', { minimumFractionDigits: 2 })}
                   </td>
