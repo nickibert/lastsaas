@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, CheckSquare, Ship, Plus, Pencil, Trash2, X }
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
-  calendarApi, calendarEntriesApi,
+  calendarApi, calendarEntriesApi, ordersApi,
   type CalendarTask, type CalendarArrival, type CalendarEntry, type CalendarEntryType,
 } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
@@ -124,6 +124,100 @@ function EntryForm({ initial, defaultDate, onSave, onClose, saving }: EntryFormP
 }
 
 // ---------------------------------------------------------------------------
+// Freight date modal
+// ---------------------------------------------------------------------------
+
+type FreightDateKey = 'shippingDate' | 'estimatedArrival' | 'arrival' | 'avisShipperDate';
+
+const FREIGHT_DATE_FIELDS: { key: FreightDateKey; label: string }[] = [
+  { key: 'shippingDate',     label: 'Versanddatum' },
+  { key: 'estimatedArrival', label: 'Voraussichtliche Ankunft (ETA)' },
+  { key: 'arrival',          label: 'Tatsächliche Ankunft' },
+  { key: 'avisShipperDate',  label: 'Avis Spediteur' },
+];
+
+function defaultDateForField(field: FreightDateKey, arrival: CalendarArrival): string {
+  if (field === 'estimatedArrival') return arrival.estimatedDate ?? '';
+  if (field === 'arrival')          return arrival.actualDate ?? '';
+  return '';
+}
+
+interface FreightDateModalProps {
+  arrival: CalendarArrival;
+  onClose: () => void;
+}
+
+function FreightDateModal({ arrival, onClose }: FreightDateModalProps) {
+  const qc = useQueryClient();
+  const [field, setField] = useState<FreightDateKey>('estimatedArrival');
+  const [date, setDate] = useState(arrival.estimatedDate ?? '');
+
+  const handleFieldChange = (f: FreightDateKey) => {
+    setField(f);
+    setDate(defaultDateForField(f, arrival));
+  };
+
+  const mut = useMutation({
+    mutationFn: async () => {
+      const order = await ordersApi.get(arrival.orderId);
+      const freight = { ...(order.freight ?? {}), [field]: date + 'T00:00:00Z' };
+      await ordersApi.update(arrival.orderId, { ...order, freight });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['calendar'] });
+      qc.invalidateQueries({ queryKey: ['order', arrival.orderId] });
+      toast.success('Datum gespeichert');
+      onClose();
+    },
+    onError: () => toast.error('Fehler beim Speichern'),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-dark-900 border border-dark-700 rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-white">Frachtdatum bearbeiten</h2>
+          <button onClick={onClose} className="p-1 text-dark-400 hover:text-white">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="text-sm text-dark-400">
+          <span className="text-white font-medium">{arrival.orderNumber}</span>
+          {arrival.supplierName && <span> – {arrival.supplierName}</span>}
+        </div>
+
+        <div>
+          <label className="block text-xs text-dark-400 mb-1">Datumsfeld</label>
+          <select value={field} onChange={e => handleFieldChange(e.target.value as FreightDateKey)}
+            className="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm focus:outline-none focus:border-primary-500">
+            {FREIGHT_DATE_FIELDS.map(f => (
+              <option key={f.key} value={f.key}>{f.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-xs text-dark-400 mb-1">Datum *</label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} autoFocus
+            className="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm focus:outline-none focus:border-primary-500" />
+        </div>
+
+        <div className="flex gap-3 pt-1">
+          <button onClick={() => mut.mutate()} disabled={!date || mut.isPending}
+            className="flex-1 py-2 bg-primary-500 text-white rounded-lg text-sm hover:bg-primary-600 disabled:opacity-50">
+            {mut.isPending ? 'Speichert…' : 'Speichern'}
+          </button>
+          <button onClick={onClose} className="flex-1 py-2 bg-dark-700 text-white rounded-lg text-sm hover:bg-dark-600">
+            Abbrechen
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Day events types
 // ---------------------------------------------------------------------------
 
@@ -150,6 +244,9 @@ export default function CalendarPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingEntry, setEditingEntry] = useState<CalendarEntry | null>(null);
   const [formDefaultDate, setFormDefaultDate] = useState<string | undefined>();
+
+  // Freight date modal state
+  const [freightModalArrival, setFreightModalArrival] = useState<CalendarArrival | null>(null);
 
   const fromDate = new Date(year, month, 1);
   const toDate   = new Date(year, month + 1, 0);
@@ -338,13 +435,22 @@ export default function CalendarPage() {
                         </Link>
                       ))}
                       {ev.arrivals.map(a => (
-                        <Link key={a.orderId} to={`/procurement/orders/${a.orderId}`}
-                          className={`block text-xs px-1.5 py-0.5 rounded truncate leading-tight
+                        <div key={a.orderId}
+                          className={`text-xs px-1.5 py-0.5 rounded leading-tight flex items-center gap-0.5 group/arrival
                             ${a.actualDate ? 'bg-teal-500/20 text-teal-400' : 'bg-primary-500/20 text-primary-300'}`}
                           title={`${a.orderNumber}${a.supplierName ? ' – ' + a.supplierName : ''}`}>
-                          <Ship className="w-2.5 h-2.5 inline mr-0.5" />
-                          {a.orderNumber}{a.supplierName ? ` – ${a.supplierName}` : ''}
-                        </Link>
+                          <Link to={`/procurement/orders/${a.orderId}`} className="flex-1 flex items-center gap-0.5 min-w-0 truncate">
+                            <Ship className="w-2.5 h-2.5 flex-shrink-0" />
+                            <span className="truncate">{a.orderNumber}{a.supplierName ? ` – ${a.supplierName}` : ''}</span>
+                          </Link>
+                          <button
+                            onClick={() => setFreightModalArrival(a)}
+                            className="opacity-0 group-hover/arrival:opacity-100 flex-shrink-0 hover:text-white transition-opacity"
+                            title="Frachtdatum bearbeiten"
+                          >
+                            <Pencil className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
                       ))}
                       {ev.entries.map(e => (
                         <div key={e.id}
@@ -416,6 +522,13 @@ export default function CalendarPage() {
                         : `ETA: ${new Date(a.estimatedDate + 'T00:00:00').toLocaleDateString('de-DE')}`}
                     </div>
                   </div>
+                  <button
+                    onClick={() => setFreightModalArrival(a)}
+                    className="p-1 flex-shrink-0 text-dark-500 hover:text-primary-400"
+                    title="Frachtdatum bearbeiten"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               ))}
             </div>
@@ -455,6 +568,14 @@ export default function CalendarPage() {
           onSave={handleSave}
           onClose={() => { setShowForm(false); setEditingEntry(null); }}
           saving={saving}
+        />
+      )}
+
+      {/* Freight date modal */}
+      {freightModalArrival && (
+        <FreightDateModal
+          arrival={freightModalArrival}
+          onClose={() => setFreightModalArrival(null)}
         />
       )}
     </div>
