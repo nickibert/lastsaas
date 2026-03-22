@@ -43,11 +43,11 @@ func NewClient(baseURL, token string) *Client {
 
 // Ping calls a lightweight endpoint to verify the connection and credentials.
 func (c *Client) Ping(ctx context.Context) error {
-	// Use the products endpoint with page[size]=1 as a health check.
-	// Xentral uses bracket-style pagination parameters (page[number] / page[size]).
+	// Use the products endpoint as a health check.
+	// Xentral requires page[size] to be between 10 and 150 (string-encoded integer).
 	_, err := c.get(ctx, "/api/v1/products", url.Values{
 		"page[number]": []string{"1"},
-		"page[size]":   []string{"1"},
+		"page[size]":   []string{"10"},
 	})
 	return err
 }
