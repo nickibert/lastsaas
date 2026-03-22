@@ -325,6 +325,7 @@ export interface Order {
   orderDate: string;
   orderContents: string;
   misc: string;
+  currency?: string;
   orderSumUsd: number;
   transportInsurancePermille: number;
   discount: number;

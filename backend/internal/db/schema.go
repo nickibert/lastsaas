@@ -38,6 +38,8 @@ func AllSchemas() []CollectionSchema {
 		customersSchema(),
 		stockMovementsSchema(),
 		stockLevelsSchema(),
+		warehousesSchema(),
+		storageLocationsSchema(),
 		tenantMembershipsSchema(),
 		invitationsSchema(),
 		plansSchema(),
@@ -859,10 +861,16 @@ func inventoryLotsSchema() CollectionSchema {
 					"quantity":     bson.M{"bsonType": "int", "minimum": 1},
 					"remaining":    bson.M{"bsonType": "int", "minimum": 0},
 					"unitEkEur":    bson.M{"bsonType": "double", "minimum": 0},
-					"source":       bson.M{"bsonType": "string", "enum": bson.A{"order", "import"}},
-					"notes":        bson.M{"bsonType": "string", "maxLength": 500},
-					"createdAt":    bson.M{"bsonType": "date"},
-					"updatedAt":    bson.M{"bsonType": "date"},
+					"source":            bson.M{"bsonType": "string", "enum": bson.A{"order", "import", "xentral"}},
+					"expiresAt":         bson.M{"bsonType": "date"},
+					"serialNumber":      bson.M{"bsonType": "string", "maxLength": 100},
+					"batchNumber":       bson.M{"bsonType": "string", "maxLength": 100},
+					"warehouseId":       bson.M{"bsonType": "objectId"},
+					"storageLocationId": bson.M{"bsonType": "objectId"},
+					"xentralId":         bson.M{"bsonType": "string"},
+					"notes":             bson.M{"bsonType": "string", "maxLength": 500},
+					"createdAt":         bson.M{"bsonType": "date"},
+					"updatedAt":         bson.M{"bsonType": "date"},
 				},
 			},
 		},
@@ -902,6 +910,7 @@ func ordersSchema() CollectionSchema {
 					"orderNumber":    bson.M{"bsonType": "string", "maxLength": 64},
 					"internalNumber": bson.M{"bsonType": "string", "maxLength": 32},
 					"orderDate":      bson.M{"bsonType": "date"},
+					"currency":       bson.M{"bsonType": "string", "maxLength": 3},
 					"orderSumUsd":    bson.M{"bsonType": "double", "minimum": 0},
 					"deliveryStatus": bson.M{"bsonType": "string", "enum": bson.A{"pending", "ordered", "shipped", "arrived", "partial"}},
 					"paymentStatus":  bson.M{"bsonType": "string", "enum": bson.A{"unpaid", "deposit_paid", "fully_paid", "overdue"}},
@@ -1098,6 +1107,52 @@ func productFreefieldDefsSchema() CollectionSchema {
 					"xentralKey":  bson.M{"bsonType": "string", "maxLength": 50},
 					"createdAt":   bson.M{"bsonType": "date"},
 					"updatedAt":   bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func warehousesSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "warehouses",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "name", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":    bson.M{"bsonType": "objectId"},
+					"xentralId":  bson.M{"bsonType": "string"},
+					"name":       bson.M{"bsonType": "string", "minLength": 1, "maxLength": 100},
+					"shortName":  bson.M{"bsonType": "string", "maxLength": 20},
+					"description": bson.M{"bsonType": "string", "maxLength": 500},
+					"active":     bson.M{"bsonType": "bool"},
+					"createdAt":  bson.M{"bsonType": "date"},
+					"updatedAt":  bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func storageLocationsSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "storage_locations",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "warehouseId", "name", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":    bson.M{"bsonType": "objectId"},
+					"warehouseId": bson.M{"bsonType": "objectId"},
+					"xentralId":  bson.M{"bsonType": "string"},
+					"name":       bson.M{"bsonType": "string", "minLength": 1, "maxLength": 100},
+					"aisle":      bson.M{"bsonType": "string", "maxLength": 20},
+					"rack":       bson.M{"bsonType": "string", "maxLength": 20},
+					"level":      bson.M{"bsonType": "string", "maxLength": 20},
+					"active":     bson.M{"bsonType": "bool"},
+					"createdAt":  bson.M{"bsonType": "date"},
+					"updatedAt":  bson.M{"bsonType": "date"},
 				},
 			},
 		},

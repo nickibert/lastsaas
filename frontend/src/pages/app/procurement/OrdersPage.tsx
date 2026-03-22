@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
-import { Plus, Search, Trash2, Eye } from 'lucide-react';
+import { Plus, Trash2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { ordersApi, suppliersApi, type Order, type DeliveryStatus, type PaymentStatus, type ReceiptStatus } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
 import { Pagination } from '../../../components/Pagination';
+import { DataTable, type BulkAction, type ColumnDef, type SortDir } from '../../../components/DataTable';
 
 const deliveryBadge: Record<DeliveryStatus, string> = {
   pending: 'bg-dark-700 text-dark-300',
@@ -56,6 +57,9 @@ export default function OrdersPage() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useLocalStorage<number>('table_page_size', 25);
   const [showForm, setShowForm] = useState(false);
+  const [sortKey, setSortKey] = useState('orderDate');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const handleSort = (key: string, dir: SortDir) => { setSortKey(key); setSortDir(dir); };
   const [form, setForm] = useState<Partial<Order>>({
     orderNumber: '',
     orderDate: new Date().toISOString().slice(0, 10),
@@ -107,6 +111,86 @@ export default function OrdersPage() {
     return suppliers.find(s => s.id === id)?.company ?? '—';
   };
 
+  const orderColumns: ColumnDef<Order>[] = [
+    {
+      key: 'orderNumber',
+      header: 'Bestellnr.',
+      sortable: true,
+      render: row => (
+        <div>
+          <div className="font-mono text-sm text-white">{row.internalNumber || row.orderNumber || '—'}</div>
+          {row.internalNumber && row.orderNumber && (
+            <div className="font-mono text-xs text-dark-500">{row.orderNumber}</div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'orderDate',
+      header: 'Datum',
+      sortable: true,
+      render: row => <span className="text-dark-300 text-sm">{new Date(row.orderDate).toLocaleDateString('de-DE')}</span>,
+    },
+    {
+      key: 'supplier',
+      header: 'Lieferant',
+      render: row => row.supplierId
+        ? <Link to={`/procurement/suppliers?highlight=${row.supplierId}`} className="text-dark-300 hover:text-primary-400 transition-colors text-sm" onClick={e => e.stopPropagation()}>{supplierName(row.supplierId)}</Link>
+        : <span className="text-dark-500">—</span>,
+    },
+    {
+      key: 'currency',
+      header: 'Währung',
+      width: 'w-20',
+      render: row => <span className="text-dark-300 text-sm font-mono">{row.currency || '—'}</span>,
+    },
+    {
+      key: 'orderSumUsd',
+      header: 'Betrag',
+      render: row => <span className="text-dark-300 text-sm font-mono">{row.orderSumUsd.toLocaleString('de-DE', { minimumFractionDigits: 2 })}</span>,
+    },
+    {
+      key: 'deliveryStatus',
+      header: 'Lieferung',
+      render: row => row.deliveryStatus
+        ? <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${deliveryBadge[row.deliveryStatus]}`}>{deliveryLabel[row.deliveryStatus]}</span>
+        : <span className="text-dark-500">—</span>,
+    },
+    {
+      key: 'paymentStatus',
+      header: 'Zahlung',
+      render: row => row.paymentStatus
+        ? <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${paymentBadge[row.paymentStatus]}`}>{paymentLabel[row.paymentStatus]}</span>
+        : <span className="text-dark-500">—</span>,
+    },
+    {
+      key: 'products',
+      header: 'Positionen',
+      render: row => <span className="text-dark-300 text-sm">{row.products?.length ?? 0}</span>,
+    },
+    {
+      key: 'updatedAt',
+      header: 'Geändert',
+      defaultVisible: false,
+      render: row => <span className="text-dark-400 text-sm">{new Date(row.updatedAt).toLocaleDateString('de-DE')}</span>,
+    },
+  ];
+
+  const orderBulkActions: BulkAction<Order>[] = [
+    {
+      label: 'Löschen',
+      icon: <Trash2 className="w-3.5 h-3.5" />,
+      variant: 'danger',
+      onClick: (rows) => {
+        const label = rows.length === 1
+          ? (rows[0].internalNumber || rows[0].orderNumber || rows[0].id)
+          : `${rows.length} Bestellungen`;
+        if (!confirm(`${label} löschen?`)) return;
+        rows.forEach(r => deleteMutation.mutate(r.id));
+      },
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -123,17 +207,6 @@ export default function OrdersPage() {
         </button>
       </div>
 
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
-        <input
-          type="text"
-          placeholder="Bestellnummer oder Inhalt suchen..."
-          value={search}
-          onChange={e => { setSearch(e.target.value); setPage(1); }}
-          className="w-full pl-10 pr-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white placeholder-dark-400 focus:outline-none focus:border-primary-500"
-        />
-      </div>
 
       {/* Create form */}
       {showForm && (

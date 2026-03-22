@@ -629,6 +629,14 @@ func (m *MongoDB) StockLevels() *mongo.Collection {
 	return m.Database.Collection("stock_levels")
 }
 
+func (m *MongoDB) Warehouses() *mongo.Collection {
+	return m.Database.Collection("warehouses")
+}
+
+func (m *MongoDB) StorageLocations() *mongo.Collection {
+	return m.Database.Collection("storage_locations")
+}
+
 func (m *MongoDB) SalesOrders() *mongo.Collection {
 	return m.Database.Collection("sales_orders")
 }

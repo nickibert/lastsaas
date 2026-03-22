@@ -225,8 +225,17 @@ type InventoryLot struct {
 	// Remaining is decremented on each outgoing stock movement; starts == Quantity.
 	Remaining    int                 `json:"remaining" bson:"remaining" validate:"min=0"`
 	UnitEkEUR    float64             `json:"unitEkEur" bson:"unitEkEur" validate:"min=0"`
-	// Source: "order" | "import" (manual stock take-over)
-	Source       string              `json:"source" bson:"source" validate:"required,oneof=order import"`
+	// Source: "order" | "import" (manual stock take-over) | "xentral" (imported from Xentral stock sync)
+	Source       string              `json:"source" bson:"source" validate:"required,oneof=order import xentral"`
+	// Tracking fields – not all lots will have all three; zero value = not applicable.
+	ExpiresAt    *time.Time          `json:"expiresAt,omitempty" bson:"expiresAt,omitempty"`   // MHD (Mindesthaltbarkeitsdatum)
+	SerialNumber string              `json:"serialNumber,omitempty" bson:"serialNumber,omitempty" validate:"omitempty,max=100"`
+	BatchNumber  string              `json:"batchNumber,omitempty" bson:"batchNumber,omitempty" validate:"omitempty,max=100"` // Charge
+	// Storage references
+	WarehouseID        *primitive.ObjectID `json:"warehouseId,omitempty" bson:"warehouseId,omitempty"`
+	StorageLocationID  *primitive.ObjectID `json:"storageLocationId,omitempty" bson:"storageLocationId,omitempty"`
+	// XentralID for import tracking
+	XentralID    string              `json:"xentralId,omitempty" bson:"xentralId,omitempty"`
 	Notes        string              `json:"notes,omitempty" bson:"notes,omitempty" validate:"omitempty,max=500"`
 	CreatedAt    time.Time           `json:"createdAt" bson:"createdAt"`
 	UpdatedAt    time.Time           `json:"updatedAt" bson:"updatedAt"`
@@ -332,7 +341,12 @@ type OrderPayment struct {
 }
 
 type OrderProduct struct {
-	ProductID        primitive.ObjectID `json:"productId" bson:"productId" validate:"required"`
+	// ProductID is nil for line items imported from Xentral whose article has not yet been synced.
+	ProductID        *primitive.ObjectID `json:"productId,omitempty" bson:"productId,omitempty"`
+	// XentralArticleID / XentralArticleNumber are set on Xentral-imported items for later resolution.
+	XentralArticleID     string `json:"xentralArticleId,omitempty" bson:"xentralArticleId,omitempty"`
+	XentralArticleNumber string `json:"xentralArticleNumber,omitempty" bson:"xentralArticleNumber,omitempty"`
+	Description      string             `json:"description,omitempty" bson:"description,omitempty" validate:"omitempty,max=255"`
 	Quantity         int                `json:"quantity" bson:"quantity" validate:"required,min=1"`
 	UnitPriceUSD     float64            `json:"unitPriceUsd" bson:"unitPriceUsd" validate:"min=0"`
 	TotalPriceUSD    float64            `json:"totalPriceUsd" bson:"totalPriceUsd" validate:"min=0"`
@@ -402,6 +416,9 @@ type Order struct {
 	OrderDate                  time.Time           `json:"orderDate" bson:"orderDate" validate:"required"`
 	OrderContents              string              `json:"orderContents" bson:"orderContents" validate:"omitempty,max=255"`
 	Misc                       string              `json:"misc" bson:"misc"`
+	// Currency is the native currency of this order (e.g. "EUR", "USD", "GBP").
+	// OrderSumUSD stores the native amount regardless of currency name (legacy field name kept for compatibility).
+	Currency                   string              `json:"currency,omitempty" bson:"currency,omitempty" validate:"omitempty,max=3"`
 	OrderSumUSD                float64             `json:"orderSumUsd" bson:"orderSumUsd" validate:"min=0"`
 	TransportInsurancePermille float64             `json:"transportInsurancePermille" bson:"transportInsurancePermille" validate:"min=0"`
 	Discount                   float64             `json:"discount" bson:"discount" validate:"min=0"`
@@ -497,15 +514,57 @@ type StockMovement struct {
 	UpdatedAt   time.Time           `json:"updatedAt" bson:"updatedAt"`
 }
 
-// StockLevel is a cached/computed current stock level per product.
+// ---------------------------------------------------------------------------
+// Warehouses / Lagerorte
+// ---------------------------------------------------------------------------
+
+// Warehouse represents a physical warehouse (Lagerort) in Xentral.
+type Warehouse struct {
+	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	TenantID    primitive.ObjectID `json:"tenantId" bson:"tenantId" validate:"required"`
+	XentralID   string             `json:"xentralId,omitempty" bson:"xentralId,omitempty"`
+	Name        string             `json:"name" bson:"name" validate:"required,min=1,max=100"`
+	ShortName   string             `json:"shortName,omitempty" bson:"shortName,omitempty" validate:"omitempty,max=20"`
+	Description string             `json:"description,omitempty" bson:"description,omitempty" validate:"omitempty,max=500"`
+	Active      bool               `json:"active" bson:"active"`
+	CreatedAt   time.Time          `json:"createdAt" bson:"createdAt"`
+	UpdatedAt   time.Time          `json:"updatedAt" bson:"updatedAt"`
+}
+
+// StorageLocation represents a specific bin/shelf (Lagerplatz) within a Warehouse.
+type StorageLocation struct {
+	ID          primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
+	TenantID    primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
+	WarehouseID primitive.ObjectID  `json:"warehouseId" bson:"warehouseId" validate:"required"`
+	XentralID   string              `json:"xentralId,omitempty" bson:"xentralId,omitempty"`
+	Name        string              `json:"name" bson:"name" validate:"required,min=1,max=100"`
+	Aisle       string              `json:"aisle,omitempty" bson:"aisle,omitempty" validate:"omitempty,max=20"`   // Gang
+	Rack        string              `json:"rack,omitempty" bson:"rack,omitempty" validate:"omitempty,max=20"`    // Regal
+	Level       string              `json:"level,omitempty" bson:"level,omitempty" validate:"omitempty,max=20"`   // Ebene
+	Active      bool                `json:"active" bson:"active"`
+	CreatedAt   time.Time           `json:"createdAt" bson:"createdAt"`
+	UpdatedAt   time.Time           `json:"updatedAt" bson:"updatedAt"`
+}
+
+// ---------------------------------------------------------------------------
+// Stock Levels
+// ---------------------------------------------------------------------------
+
+// StockLevel is a cached/computed current stock level per product, optionally
+// scoped to a warehouse and/or storage location for granular visibility.
 type StockLevel struct {
-	ID        primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	TenantID  primitive.ObjectID `json:"tenantId" bson:"tenantId" validate:"required"`
-	ProductID primitive.ObjectID `json:"productId" bson:"productId" validate:"required"`
-	Quantity  float64            `json:"quantity" bson:"quantity"`
-	Unit      string             `json:"unit,omitempty" bson:"unit,omitempty" validate:"omitempty,max=20"`
-	Location  string             `json:"location,omitempty" bson:"location,omitempty" validate:"omitempty,max=100"`
-	UpdatedAt time.Time          `json:"updatedAt" bson:"updatedAt"`
+	ID                primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
+	TenantID          primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
+	ProductID         primitive.ObjectID  `json:"productId" bson:"productId" validate:"required"`
+	WarehouseID       *primitive.ObjectID `json:"warehouseId,omitempty" bson:"warehouseId,omitempty"`
+	StorageLocationID *primitive.ObjectID `json:"storageLocationId,omitempty" bson:"storageLocationId,omitempty"`
+	Quantity          float64             `json:"quantity" bson:"quantity"`
+	Unit              string              `json:"unit,omitempty" bson:"unit,omitempty" validate:"omitempty,max=20"`
+	// Legacy plain-text location; use WarehouseID/StorageLocationID for structured data.
+	Location          string              `json:"location,omitempty" bson:"location,omitempty" validate:"omitempty,max=100"`
+	// XentralID allows linking back to the Xentral stock entry.
+	XentralID         string              `json:"xentralId,omitempty" bson:"xentralId,omitempty"`
+	UpdatedAt         time.Time           `json:"updatedAt" bson:"updatedAt"`
 }
 
 // ---------------------------------------------------------------------------

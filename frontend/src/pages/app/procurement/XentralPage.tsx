@@ -2,17 +2,34 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link2, CheckCircle, XCircle, RefreshCw, Settings2, Clock, AlertCircle, Building2, Download, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
-import { xentralApi, type XentralConfig, type XentralSyncLog, type XentralInstanceInfo } from '../../../api/xentral';
+import { xentralApi, type XentralConfig, type XentralSyncLog, type XentralInstanceInfo, type XentralSyncEntity } from '../../../api/xentral';
 import { useTenant } from '../../../contexts/TenantContext';
 
 const inputCls = 'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm focus:outline-none focus:border-primary-500';
 const labelCls = 'block text-xs text-dark-400 mb-1';
 
-const ENTITIES: { key: keyof Pick<XentralConfig, 'syncProducts' | 'syncCustomers' | 'syncSuppliers' | 'syncOrders'>; label: string; syncKey: 'products' | 'customers' | 'suppliers' | 'orders'; lastKey: keyof Pick<XentralConfig, 'lastSyncProducts' | 'lastSyncCustomers' | 'lastSyncSuppliers' | 'lastSyncOrders'> }[] = [
-  { key: 'syncProducts',  label: 'Artikel',     syncKey: 'products',  lastKey: 'lastSyncProducts'  },
-  { key: 'syncCustomers', label: 'Kunden',      syncKey: 'customers', lastKey: 'lastSyncCustomers' },
-  { key: 'syncSuppliers', label: 'Lieferanten', syncKey: 'suppliers', lastKey: 'lastSyncSuppliers' },
-  { key: 'syncOrders',    label: 'Aufträge',    syncKey: 'orders',    lastKey: 'lastSyncOrders'    },
+interface EntityDef {
+  key: keyof XentralConfig;
+  label: string;
+  syncKey: XentralSyncEntity;
+  lastKey: keyof XentralConfig;
+  group: 'inbound' | 'outbound';
+  description?: string;
+}
+
+const ENTITIES: EntityDef[] = [
+  // Inbound: Xentral → LastSaaS
+  { key: 'syncProducts',       label: 'Artikel',           syncKey: 'products',        lastKey: 'lastSyncProducts',       group: 'inbound', description: 'Artikel, EANs, Freefields' },
+  { key: 'syncCustomers',      label: 'Kunden',            syncKey: 'customers',       lastKey: 'lastSyncCustomers',      group: 'inbound' },
+  { key: 'syncSuppliers',      label: 'Lieferanten',       syncKey: 'suppliers',       lastKey: 'lastSyncSuppliers',      group: 'inbound' },
+  { key: 'syncOrders',         label: 'Bestellungen',      syncKey: 'orders',          lastKey: 'lastSyncOrders',         group: 'inbound', description: 'Einmalig-Import (Historien-Migration)' },
+  { key: 'syncSalesOrders',    label: 'Verkaufsaufträge',  syncKey: 'sales_orders',    lastKey: 'lastSyncSalesOrders',    group: 'inbound', description: 'Für Dispositionsplanung' },
+  { key: 'syncPurchasePrices', label: 'EK-Preislisten',    syncKey: 'purchase_prices', lastKey: 'lastSyncPurchasePrices', group: 'inbound' },
+  { key: 'syncSalesPrices',    label: 'VK-Preislisten',    syncKey: 'sales_prices',    lastKey: 'lastSyncSalesPrices',    group: 'inbound' },
+  { key: 'syncWarehouses',     label: 'Lagerorte',         syncKey: 'warehouses',      lastKey: 'lastSyncWarehouses',     group: 'inbound', description: 'Lagerorte + Lagerplätze' },
+  { key: 'syncStocks',         label: 'Lagerbestände',     syncKey: 'stocks',          lastKey: 'lastSyncStocks',         group: 'inbound', description: 'Mengen, MHD, Serien- und Chargennummern' },
+  // Outbound: LastSaaS → Xentral
+  { key: 'pushOrdersToXentral', label: 'Bestellungen →', syncKey: 'push_orders', lastKey: 'lastPushOrders', group: 'outbound', description: 'Bestellungen nach Xentral pushen' },
 ];
 
 const STATUS_COLORS: Record<string, string> = {
@@ -66,6 +83,13 @@ export default function XentralPage() {
     syncCustomers: true,
     syncSuppliers: true,
     syncOrders: false,
+    syncSalesOrders: false,
+    syncPurchasePrices: false,
+    syncSalesPrices: false,
+    syncWarehouses: false,
+    syncStocks: false,
+    pushProductsToXentral: false,
+    pushOrdersToXentral: false,
     ...cfg,
     ...form,
   };
@@ -328,31 +352,40 @@ export default function XentralPage() {
           </select>
         </div>
 
-        {/* Per-entity rows */}
-        <div className="space-y-3">
-          {ENTITIES.map(({ key, label, syncKey, lastKey }) => (
-            <div key={key} className="flex items-center gap-4 py-3 border-b border-dark-800 last:border-0">
-              <label className="flex items-center gap-2 cursor-pointer w-36">
-                <input type="checkbox" checked={merged[key] as boolean ?? false}
-                  onChange={e => upd(key, e.target.checked)}
-                  className="w-4 h-4 accent-primary-500" />
-                <span className="text-sm text-white">{label}</span>
-              </label>
-              <span className="text-xs text-dark-500 flex-1">
-                Letzter Sync: {fmt(cfg?.[lastKey] as string | undefined)}
-              </span>
-              <button
-                onClick={() => handleSyncEntity(syncKey)}
-                disabled={syncingEntity === syncKey || !merged.enabled || !merged[key]}
-                className="flex items-center gap-1.5 px-2.5 py-1 bg-dark-700 text-dark-300 rounded hover:bg-dark-600 hover:text-white disabled:opacity-40 text-xs">
-                {syncingEntity === syncKey
-                  ? <RefreshCw className="w-3 h-3 animate-spin" />
-                  : <RefreshCw className="w-3 h-3" />}
-                Sync
-              </button>
+        {/* Per-entity rows — grouped inbound / outbound */}
+        {(['inbound', 'outbound'] as const).map(group => {
+          const groupEntities = ENTITIES.filter(e => e.group === group);
+          return (
+            <div key={group} className="space-y-1">
+              <p className="text-xs text-dark-500 font-medium uppercase tracking-wider pb-1">
+                {group === 'inbound' ? '← Xentral → LastSaaS' : '→ LastSaaS → Xentral'}
+              </p>
+              {groupEntities.map(({ key, label, syncKey, lastKey, description }) => (
+                <div key={key} className="flex items-center gap-4 py-2.5 border-b border-dark-800/60 last:border-0">
+                  <label className="flex items-center gap-2 cursor-pointer w-44 flex-shrink-0">
+                    <input type="checkbox" checked={merged[key] as boolean ?? false}
+                      onChange={e => upd(key, e.target.checked)}
+                      className="w-4 h-4 accent-primary-500" />
+                    <span className="text-sm text-white">{label}</span>
+                  </label>
+                  <span className="text-xs text-dark-500 flex-1 hidden sm:block">
+                    {description && <span className="mr-2 text-dark-600">{description} ·</span>}
+                    Letzter Sync: {fmt(cfg?.[lastKey] as string | undefined)}
+                  </span>
+                  <button
+                    onClick={() => handleSyncEntity(syncKey)}
+                    disabled={syncingEntity === syncKey || !merged.enabled || !merged[key]}
+                    className="flex items-center gap-1.5 px-2.5 py-1 bg-dark-700 text-dark-300 rounded hover:bg-dark-600 hover:text-white disabled:opacity-40 text-xs">
+                    {syncingEntity === syncKey
+                      ? <RefreshCw className="w-3 h-3 animate-spin" />
+                      : <RefreshCw className="w-3 h-3" />}
+                    Sync
+                  </button>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          );
+        })}
 
         {/* Save sync settings */}
         <button

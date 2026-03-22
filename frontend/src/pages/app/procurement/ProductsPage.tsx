@@ -3,7 +3,7 @@ import { useHighlightRow } from '../../../hooks/useHighlightRow';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Trash2, Pencil, Tag, X, SlidersHorizontal, Download, History } from 'lucide-react';
+import { Plus, Trash2, Pencil, Tag, X, SlidersHorizontal, Download, History } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   productsApi, goodsGroupsApi, suppliersApi, productPriceListsApi, ekHistoryApi, inventoryValuationApi,
@@ -11,6 +11,7 @@ import {
 } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
 import { Pagination } from '../../../components/Pagination';
+import { DataTable, textEditInput, numberEditInput, type BulkAction, type ColumnDef, type SortDir } from '../../../components/DataTable';
 
 const inputCls = 'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm focus:outline-none focus:border-primary-500';
 const labelCls = 'block text-xs text-dark-400 mb-1';
@@ -423,6 +424,10 @@ export default function ProductsPage() {
     tags: [], attributes: [],
   });
 
+  const [sortKey, setSortKey] = useState('nameShort');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const handleSort = (key: string, dir: SortDir) => { setSortKey(key); setSortDir(dir); };
+
   const { data, isLoading } = useQuery({
     queryKey: ['products', search, page, limit, supplierFilter, goodsGroupFilter, tagFilter, attrKeyFilter, attrValueFilter],
     queryFn: () => productsApi.list(
@@ -468,6 +473,87 @@ export default function ProductsPage() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['products'] }); toast.success('Gelöscht'); },
   });
 
+  const patchMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<Product> }) => productsApi.update(id, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['products'] }); toast.success('Gespeichert'); },
+    onError: () => toast.error('Fehler beim Speichern'),
+  });
+
+  const productColumns: ColumnDef<Product>[] = [
+    {
+      key: 'nameShort',
+      header: 'Bezeichnung',
+      sortable: true,
+      render: r => <span className="font-mono text-white">{r.nameShort}</span>,
+      getValue: r => r.nameShort,
+      renderEdit: textEditInput('Kurzname'),
+      onEdit: (row, val) => patchMutation.mutate({ id: row.id, data: { nameShort: val } }),
+    },
+    {
+      key: 'ownNameShort',
+      header: 'Eigenbezeichnung',
+      defaultVisible: false,
+      render: r => r.ownNameShort || <span className="text-dark-500">—</span>,
+      getValue: r => r.ownNameShort ?? '',
+      renderEdit: textEditInput('Eigenname'),
+      onEdit: (row, val) => patchMutation.mutate({ id: row.id, data: { ownNameShort: val } }),
+    },
+    {
+      key: 'ean',
+      header: 'EAN',
+      render: r => <span className="font-mono text-dark-300">{r.ean || '—'}</span>,
+      getValue: r => r.ean ?? '',
+      renderEdit: textEditInput('EAN'),
+      onEdit: (row, val) => patchMutation.mutate({ id: row.id, data: { ean: val } }),
+    },
+    {
+      key: 'lastEk',
+      header: 'Letzter EK',
+      render: r => r.lastEk > 0 ? <span className="font-mono text-dark-300">{r.lastEk.toFixed(2)} €</span> : <span className="text-dark-500">—</span>,
+      getValue: r => String(r.lastEk ?? 0),
+      renderEdit: numberEditInput('EK EUR'),
+      onEdit: (row, val) => patchMutation.mutate({ id: row.id, data: { lastEk: parseFloat(val) } }),
+    },
+    {
+      key: 'vpe',
+      header: 'VPE',
+      render: r => <span className="font-mono text-dark-300">{r.vpe > 0 ? r.vpe : '—'}</span>,
+      getValue: r => String(r.vpe ?? 0),
+      renderEdit: numberEditInput('VPE'),
+      onEdit: (row, val) => patchMutation.mutate({ id: row.id, data: { vpe: parseInt(val) } }),
+    },
+    {
+      key: 'tags',
+      header: 'Tags',
+      defaultVisible: false,
+      render: r => (
+        <div className="flex flex-wrap gap-1">
+          {(r.tags ?? []).map(t => (
+            <span key={t} className="px-1.5 py-0.5 bg-primary-500/15 text-primary-400 rounded text-xs">{t}</span>
+          ))}
+        </div>
+      ),
+    },
+    {
+      key: 'updatedAt',
+      header: 'Geändert',
+      defaultVisible: false,
+      render: r => <span className="text-dark-400">{new Date(r.updatedAt).toLocaleDateString('de-DE')}</span>,
+    },
+  ];
+
+  const productBulkActions: BulkAction<Product>[] = [
+    {
+      label: 'Löschen',
+      icon: <Trash2 className="w-3.5 h-3.5" />,
+      variant: 'danger',
+      onClick: (rows) => {
+        if (!confirm(`${rows.length} Produkt(e) löschen?`)) return;
+        rows.forEach(r => deleteMutation.mutate(r.id));
+      },
+    },
+  ];
+
   const resetForm = () => setForm({ nameShort: '', nameLong: '', ean: '', wtn: '', tags: [], attributes: [] });
 
   const startEdit = (p: Product) => {
@@ -506,13 +592,7 @@ export default function ProductsPage() {
       </div>
 
       <div className="space-y-2">
-        <div className="flex gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
-            <input type="text" placeholder="Name, Eigenname oder EAN suchen..." value={search}
-              onChange={e => handleSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white placeholder-dark-400 text-sm focus:outline-none focus:border-primary-500" />
-          </div>
+        <div className="flex gap-3 justify-end">
           <button onClick={() => setShowFilters(!showFilters)}
             className={`flex items-center gap-2 px-3 py-2 border rounded-lg text-sm transition-colors ${
               showFilters || activeFilterCount > 0
@@ -682,67 +762,23 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {isLoading ? (
-        <div className="text-dark-400">Lädt...</div>
-      ) : (
-        <div className="bg-dark-900/50 border border-dark-800 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="border-b border-dark-800">
-              <tr>
-                <th className="text-left px-4 py-3 text-dark-400 font-medium">Kurzname</th>
-                <th className="text-left px-4 py-3 text-dark-400 font-medium">Eigenname</th>
-                <th className="text-left px-4 py-3 text-dark-400 font-medium">Langname</th>
-                <th className="text-left px-4 py-3 text-dark-400 font-medium">EAN</th>
-                <th className="text-left px-4 py-3 text-dark-400 font-medium">Warengruppe</th>
-                <th className="text-left px-4 py-3 text-dark-400 font-medium">Tags</th>
-                <th className="text-right px-4 py-3 text-dark-400 font-medium">EK (EUR)</th>
-                <th className="px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-dark-800/50">
-              {products.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-dark-400">Keine Produkte gefunden</td></tr>
-              ) : products.map(p => (
-                <tr key={p.id} data-highlight-id={p.id} className="hover:bg-dark-800/30">
-                  <td className="px-4 py-3 text-white font-mono">{p.nameShort}</td>
-                  <td className="px-4 py-3 text-dark-300">{p.ownNameShort || '—'}</td>
-                  <td className="px-4 py-3 text-dark-400">{p.nameLong || '—'}</td>
-                  <td className="px-4 py-3 text-dark-400 font-mono">{p.ean || '—'}</td>
-                  <td className="px-4 py-3 text-sm">
-                    {p.goodsGroupId
-                      ? <Link to={`/procurement/goods-groups?highlight=${p.goodsGroupId}`} className="text-dark-300 hover:text-primary-400 transition-colors">
-                          {goodsGroups.find(g => g.id === p.goodsGroupId)?.name ?? '—'}
-                        </Link>
-                      : <span className="text-dark-500">—</span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {(p.tags ?? []).map(t => (
-                        <span key={t} className="px-1.5 py-0.5 bg-primary-500/15 text-primary-400 rounded text-xs">{t}</span>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-right text-dark-300 font-mono">
-                    {p.lastEk > 0 ? p.lastEk.toFixed(2) : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <button onClick={() => startEdit(p)} className="p-1 text-dark-400 hover:text-primary-400">
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => { if (confirm(`${p.nameShort} löschen?`)) deleteMutation.mutate(p.id); }}
-                        className="p-1 text-dark-400 hover:text-red-400">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <Pagination page={page} pages={pages} total={total} limit={limit} onPage={setPage} onLimit={l => { setLimit(l); setPage(1); }} />
-        </div>
-      )}
+      <DataTable
+        tableKey="products"
+        columns={productColumns}
+        data={products}
+        getRowId={r => r.id}
+        searchValue={search}
+        onSearchChange={handleSearch}
+        searchPlaceholder="Name, Eigenname oder EAN suchen..."
+        bulkActions={productBulkActions}
+        onRowClick={row => startEdit(row)}
+        emptyMessage="Keine Produkte gefunden"
+        isLoading={isLoading}
+        sortKey={sortKey}
+        sortDir={sortDir}
+        onSort={handleSort}
+      />
+      <Pagination page={page} pages={pages} total={total} limit={limit} onPage={setPage} onLimit={l => { setLimit(l); setPage(1); }} />
     </div>
   );
 }

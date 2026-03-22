@@ -405,18 +405,23 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 
 	now := time.Now()
 
-	// Resolve order date
+	// Resolve order date from Xentral. Try ISO date first, then datetime prefix.
 	orderDate := now
 	if d := xo.ResolvedDate(); d != "" {
-		if t, parseErr := time.Parse("2006-01-02", d); parseErr == nil {
-			orderDate = t
+		for _, layout := range []string{"2006-01-02T15:04:05Z", "2006-01-02T15:04:05", "2006-01-02"} {
+			if t, parseErr := time.Parse(layout, d); parseErr == nil {
+				orderDate = t
+				break
+			}
 		}
 	}
 
 	// Resolve supplier via mapping (requires suppliers sync to have run first)
 	supplierID := e.resolveSupplierID(ctx, tenantID, xo.Supplier.ID)
 
-	// Build order products from line items; resolve local product IDs where possible
+	// Build order products from ALL line items.
+	// ProductID is optional: items imported before the products sync runs still carry
+	// XentralArticleID so they can be resolved on the next sync pass.
 	var orderProducts []models.OrderProduct
 	for _, item := range xo.LineItems {
 		qty := int(item.Quantity)
@@ -424,20 +429,23 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 			qty = 1
 		}
 		op := models.OrderProduct{
-			Quantity:      qty,
-			UnitPriceUSD:  item.UnitPrice,
-			TotalPriceUSD: item.UnitPrice * item.Quantity,
+			XentralArticleID:     item.Article.ID,
+			XentralArticleNumber: item.Article.ArticleNumber,
+			Description:          item.Description,
+			Quantity:             qty,
+			UnitPriceUSD:         item.UnitPrice,
+			TotalPriceUSD:        item.UnitPrice * float64(qty),
 		}
 		if pid := e.resolveProductID(ctx, tenantID, item.Article.ID); pid != nil {
-			op.ProductID = *pid
+			op.ProductID = pid
 		}
-		// Only include line items where we could resolve the product,
-		// to satisfy the required ProductID field on OrderProduct.
-		if op.ProductID != (primitive.ObjectID{}) {
-			orderProducts = append(orderProducts, op)
-		}
+		orderProducts = append(orderProducts, op)
 	}
 
+	currency := xo.Currency
+	if currency == "" {
+		currency = "EUR"
+	}
 	orderNumber := xo.ResolvedOrderNumber()
 
 	if err == mongo.ErrNoDocuments {
@@ -447,6 +455,7 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 			SupplierID:  supplierID,
 			OrderNumber: orderNumber,
 			OrderDate:   orderDate,
+			Currency:    currency,
 			OrderSumUSD: xo.TotalNet,
 			Products:    orderProducts,
 			CreatedAt:   now,
@@ -473,13 +482,14 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 
 	setFields := bson.M{
 		"orderSumUsd": xo.TotalNet,
+		"currency":    currency,
+		"orderDate":   orderDate,
 		"updatedAt":   now,
+		// Always write products (even empty slice) so previous partial data is corrected.
+		"products": orderProducts,
 	}
 	if supplierID != nil {
 		setFields["supplierId"] = supplierID
-	}
-	if len(orderProducts) > 0 {
-		setFields["products"] = orderProducts
 	}
 	_, _ = e.db.Orders().UpdateOne(ctx,
 		bson.M{"_id": mapping.LocalID, "tenantId": tenantID},
@@ -904,7 +914,7 @@ func (e *Engine) PushOrderToXentral(ctx context.Context, tenantID, orderID primi
 	// Build line items (only those with a mapped Xentral article)
 	var lineItems []XPOLineItemCreate
 	for _, p := range order.Products {
-		xArticleID := e.resolveXentralID(ctx, tenantID, "product", &p.ProductID)
+		xArticleID := e.resolveXentralID(ctx, tenantID, "product", p.ProductID)
 		if xArticleID == "" {
 			continue // skip unmapped products
 		}
@@ -1139,7 +1149,244 @@ func runScheduledSyncs(ctx context.Context, database *db.MongoDB) {
 				bson.M{"$set": bson.M{"lastPushOrders": t}},
 			)
 		}
+		if cfg.SyncWarehouses && isDue(cfg.LastSyncWarehouses, now, interval) {
+			engine.SyncWarehouses(ctx, cfg.TenantID, client) //nolint
+			t := now
+			database.XentralConfigs().UpdateOne(ctx, //nolint
+				bson.M{"tenantId": cfg.TenantID},
+				bson.M{"$set": bson.M{"lastSyncWarehouses": t}},
+			)
+		}
+		if cfg.SyncStocks && isDue(cfg.LastSyncStocks, now, interval) {
+			engine.SyncStocks(ctx, cfg.TenantID, client) //nolint
+			t := now
+			database.XentralConfigs().UpdateOne(ctx, //nolint
+				bson.M{"tenantId": cfg.TenantID},
+				bson.M{"$set": bson.M{"lastSyncStocks": t}},
+			)
+		}
 	}
+}
+
+// -------------------------------------------------------------------
+// Warehouses (Xentral /api/v1/warehouses + /api/v1/storageLocations → LastSaaS)
+// -------------------------------------------------------------------
+
+func (e *Engine) SyncWarehouses(ctx context.Context, tenantID primitive.ObjectID, client *Client) models.XentralSyncLog {
+	log := e.startLog(ctx, tenantID, "warehouses")
+
+	warehouses, err := client.ListWarehouses(ctx)
+	if err != nil {
+		return e.failLog(ctx, log, err.Error())
+	}
+	for _, w := range warehouses {
+		if err := e.upsertWarehouse(ctx, tenantID, w); err != nil {
+			log.Errors = append(log.Errors, fmt.Sprintf("%s: %v", w.ID, err))
+			log.Skipped++
+		} else {
+			log.Updated++
+		}
+	}
+
+	locations, err := client.ListStorageLocations(ctx)
+	if err != nil {
+		// Non-fatal: some installations don't have storage locations
+		log.Errors = append(log.Errors, fmt.Sprintf("storage locations: %v", err))
+	} else {
+		for _, l := range locations {
+			if err := e.upsertStorageLocation(ctx, tenantID, l); err != nil {
+				log.Errors = append(log.Errors, fmt.Sprintf("loc %s: %v", l.ID, err))
+				log.Skipped++
+			} else {
+				log.Updated++
+			}
+		}
+	}
+
+	return e.finishLog(ctx, log)
+}
+
+func (e *Engine) upsertWarehouse(ctx context.Context, tenantID primitive.ObjectID, xw XWarehouse) error {
+	if xw.ID == "" {
+		return nil
+	}
+	now := time.Now()
+	result, err := e.db.Warehouses().UpdateOne(ctx,
+		bson.M{"tenantId": tenantID, "xentralId": xw.ID},
+		bson.M{"$set": bson.M{
+			"name":      truncate(xw.Name, 100),
+			"shortName": truncate(xw.ShortName, 20),
+			"active":    xw.Active,
+			"updatedAt": now,
+		}, "$setOnInsert": bson.M{
+			"tenantId":  tenantID,
+			"xentralId": xw.ID,
+			"createdAt": now,
+		}},
+		options.Update().SetUpsert(true),
+	)
+	_ = result
+	return err
+}
+
+func (e *Engine) upsertStorageLocation(ctx context.Context, tenantID primitive.ObjectID, xl XStorageLocation) error {
+	if xl.ID == "" {
+		return nil
+	}
+	// Resolve parent warehouse ObjectID
+	var wh struct {
+		ID primitive.ObjectID `bson:"_id"`
+	}
+	warehouseFilter := bson.M{"tenantId": tenantID, "xentralId": xl.Warehouse.ID}
+	if err := e.db.Warehouses().FindOne(ctx, warehouseFilter).Decode(&wh); err != nil {
+		return fmt.Errorf("warehouse %s not found: %w", xl.Warehouse.ID, err)
+	}
+	now := time.Now()
+	_, err := e.db.StorageLocations().UpdateOne(ctx,
+		bson.M{"tenantId": tenantID, "xentralId": xl.ID},
+		bson.M{"$set": bson.M{
+			"name":        truncate(xl.Name, 100),
+			"warehouseId": wh.ID,
+			"aisle":       truncate(xl.Aisle, 20),
+			"rack":        truncate(xl.Rack, 20),
+			"level":       truncate(xl.Level, 20),
+			"active":      xl.Active,
+			"updatedAt":   now,
+		}, "$setOnInsert": bson.M{
+			"tenantId":  tenantID,
+			"xentralId": xl.ID,
+			"createdAt": now,
+		}},
+		options.Update().SetUpsert(true),
+	)
+	return err
+}
+
+// -------------------------------------------------------------------
+// Stocks (Xentral /api/v1/stocks → LastSaaS StockLevel)
+// -------------------------------------------------------------------
+
+func (e *Engine) SyncStocks(ctx context.Context, tenantID primitive.ObjectID, client *Client) models.XentralSyncLog {
+	log := e.startLog(ctx, tenantID, "stocks")
+
+	stocks, err := client.ListProductStocks(ctx)
+	if err != nil {
+		return e.failLog(ctx, log, err.Error())
+	}
+
+	for _, s := range stocks {
+		if err := e.upsertStockLevel(ctx, tenantID, s); err != nil {
+			log.Errors = append(log.Errors, fmt.Sprintf("%s: %v", s.ID, err))
+			log.Skipped++
+		} else {
+			log.Updated++
+		}
+	}
+
+	return e.finishLog(ctx, log)
+}
+
+func (e *Engine) upsertStockLevel(ctx context.Context, tenantID primitive.ObjectID, xs XProductStock) error {
+	if xs.ID == "" || xs.Article.ID == "" {
+		return nil
+	}
+	productID := e.resolveProductID(ctx, tenantID, xs.Article.ID)
+	if productID == nil {
+		return nil // product not yet synced — skip silently
+	}
+
+	// Optionally resolve warehouse and storage location by Xentral ID.
+	var warehouseID, locationID *primitive.ObjectID
+	if xs.Warehouse.ID != "" {
+		var wh struct {
+			ID primitive.ObjectID `bson:"_id"`
+		}
+		if err := e.db.Warehouses().FindOne(ctx, bson.M{"tenantId": tenantID, "xentralId": xs.Warehouse.ID}).Decode(&wh); err == nil {
+			warehouseID = &wh.ID
+		}
+	}
+	if xs.StorageLocation.ID != "" {
+		var loc struct {
+			ID primitive.ObjectID `bson:"_id"`
+		}
+		if err := e.db.StorageLocations().FindOne(ctx, bson.M{"tenantId": tenantID, "xentralId": xs.StorageLocation.ID}).Decode(&loc); err == nil {
+			locationID = &loc.ID
+		}
+	}
+
+	now := time.Now()
+	setFields := bson.M{
+		"productId":   *productID,
+		"quantity":    xs.Quantity,
+		"unit":        xs.Unit,
+		"xentralId":   xs.ID,
+		"updatedAt":   now,
+	}
+	if warehouseID != nil {
+		setFields["warehouseId"] = warehouseID
+	}
+	if locationID != nil {
+		setFields["storageLocationId"] = locationID
+	}
+	if xs.Warehouse.Name != "" {
+		setFields["location"] = xs.Warehouse.Name
+	}
+
+	_, err := e.db.StockLevels().UpdateOne(ctx,
+		bson.M{"tenantId": tenantID, "xentralId": xs.ID},
+		bson.M{"$set": setFields, "$setOnInsert": bson.M{"tenantId": tenantID, "createdAt": now}},
+		options.Update().SetUpsert(true),
+	)
+	if err != nil {
+		return err
+	}
+
+	// If the stock entry carries tracking info, also maintain an InventoryLot.
+	if xs.SerialNumber != "" || xs.BatchNumber != "" || xs.BestBefore != "" {
+		lot := models.InventoryLot{
+			TenantID:          tenantID,
+			ProductID:         *productID,
+			ReceivedAt:        now,
+			Quantity:          int(xs.Quantity),
+			Remaining:         int(xs.Quantity),
+			Source:            "xentral",
+			SerialNumber:      xs.SerialNumber,
+			BatchNumber:       xs.BatchNumber,
+			WarehouseID:       warehouseID,
+			StorageLocationID: locationID,
+			XentralID:         xs.ID,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+		}
+		if xs.BestBefore != "" {
+			if t, err := time.Parse("2006-01-02", xs.BestBefore); err == nil {
+				lot.ExpiresAt = &t
+			}
+		}
+		_, _ = e.db.InventoryLots().UpdateOne(ctx,
+			bson.M{"tenantId": tenantID, "xentralId": xs.ID},
+			bson.M{"$set": bson.M{
+				"quantity":          lot.Quantity,
+				"remaining":         lot.Remaining,
+				"serialNumber":      lot.SerialNumber,
+				"batchNumber":       lot.BatchNumber,
+				"expiresAt":         lot.ExpiresAt,
+				"warehouseId":       lot.WarehouseID,
+				"storageLocationId": lot.StorageLocationID,
+				"updatedAt":         now,
+			}, "$setOnInsert": bson.M{
+				"tenantId":   tenantID,
+				"productId":  *productID,
+				"receivedAt": now,
+				"source":     "xentral",
+				"xentralId":  xs.ID,
+				"unitEkEur":  0,
+				"createdAt":  now,
+			}},
+			options.Update().SetUpsert(true),
+		)
+	}
+	return nil
 }
 
 func isDue(last *time.Time, now time.Time, interval time.Duration) bool {

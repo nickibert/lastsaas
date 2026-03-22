@@ -163,16 +163,65 @@ type XSupplier struct {
 
 // XPurchaseOrder represents a purchase order (Lieferantenbestellung) from Xentral v3.
 type XPurchaseOrder struct {
-	ID             string              `json:"id"`
-	OrderNumber    string              `json:"orderNumber"`
-	DocumentNumber string              `json:"documentNumber"`
-	Status         string              `json:"status"`
-	Date           string              `json:"date"`
-	OrderDate      string              `json:"orderDate"`      // fallback field name
-	Supplier       XPOSupplier         `json:"supplier"`
-	LineItems      []XPOLineItem       `json:"lineItems"`
-	TotalNet       float64             `json:"totalNet"`
-	Currency       string              `json:"currency"`
+	ID             string        `json:"id"`
+	OrderNumber    string        `json:"orderNumber"`
+	DocumentNumber string        `json:"documentNumber"`
+	Status         string        `json:"status"`
+	Date           string        `json:"date"`
+	OrderDate      string        `json:"orderDate"` // fallback field name
+	Supplier       XPOSupplier   `json:"supplier"`
+	LineItems      []XPOLineItem `json:"lineItems"`
+	TotalNet       float64       `json:"totalNet"`
+	Currency       string        `json:"currency"`
+}
+
+// -------------------------------------------------------------------
+// Warehouses / Lagerorte
+// -------------------------------------------------------------------
+
+// XWarehouse represents a Xentral warehouse (Lagerort).
+type XWarehouse struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	ShortName string `json:"shortname"` // Xentral field: "shortname"
+	Active    bool   `json:"active"`
+}
+
+// XStorageLocation represents a Xentral storage location (Lagerplatz) within a warehouse.
+type XStorageLocation struct {
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Warehouse   XEntityRef `json:"warehouse"`
+	Aisle       string     `json:"aisle"`
+	Rack        string     `json:"rack"`
+	Level       string     `json:"level"`
+	Active      bool       `json:"active"`
+}
+
+// XEntityRef is a slim reference returned inside nested objects.
+type XEntityRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// -------------------------------------------------------------------
+// Product Stocks (undocumented /api/v1/stocks)
+// -------------------------------------------------------------------
+
+// XProductStock represents one stock entry from the undocumented Xentral stocks endpoint.
+// Field names follow the observed Xentral response format; zero values mean "not applicable".
+type XProductStock struct {
+	ID              string     `json:"id"`
+	Article         XEntityRef `json:"article"`         // {id, name/articleNumber}
+	Warehouse       XEntityRef `json:"warehouse"`
+	StorageLocation XEntityRef `json:"storageLocation"` // Lagerplatz; may be empty
+	Quantity        float64    `json:"quantity"`
+	ReservedQty     float64    `json:"reservedQuantity"`
+	Unit            string     `json:"unit"`
+	// Tracking (optional fields — not every installation / article uses all of them)
+	BestBefore   string `json:"bestBefore"`   // MHD as "YYYY-MM-DD" or empty
+	SerialNumber string `json:"serialNumber"` // Seriennummer
+	BatchNumber  string `json:"batchNumber"`  // Charge
 }
 
 // ResolvedOrderNumber returns the first non-empty order/document number.
@@ -313,6 +362,54 @@ func (c *Client) ListPurchaseOrders(ctx context.Context) ([]XPurchaseOrder, erro
 // The v3 salesOrders endpoint requires the feature flag "api-v3-sales-orders" on the instance.
 func (c *Client) ListSalesOrders(ctx context.Context) ([]XSalesOrder, error) {
 	return listAllCursor[XSalesOrder](c, ctx, "/api/v3/salesOrders")
+}
+
+// ListWarehouses fetches all warehouses (Lagerorte) from Xentral.
+func (c *Client) ListWarehouses(ctx context.Context) ([]XWarehouse, error) {
+	var all []XWarehouse
+	for page := 1; ; page++ {
+		batch, err := listPage[XWarehouse](c, ctx, "/api/v1/warehouses", page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < pageSize {
+			break
+		}
+	}
+	return all, nil
+}
+
+// ListStorageLocations fetches all storage locations (Lagerplätze) from Xentral.
+func (c *Client) ListStorageLocations(ctx context.Context) ([]XStorageLocation, error) {
+	var all []XStorageLocation
+	for page := 1; ; page++ {
+		batch, err := listPage[XStorageLocation](c, ctx, "/api/v1/storageLocations", page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < pageSize {
+			break
+		}
+	}
+	return all, nil
+}
+
+// ListProductStocks fetches current stock levels from the undocumented /api/v1/stocks endpoint.
+func (c *Client) ListProductStocks(ctx context.Context) ([]XProductStock, error) {
+	var all []XProductStock
+	for page := 1; ; page++ {
+		batch, err := listPage[XProductStock](c, ctx, "/api/v1/stocks", page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < pageSize {
+			break
+		}
+	}
+	return all, nil
 }
 
 // PatchProductEAN pushes an EAN barcode back to the matching Xentral article.

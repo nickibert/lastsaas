@@ -44,30 +44,51 @@ export interface XentralConfig {
   id?: string;
   tenantId?: string;
   baseUrl: string;
-  apiTokenMask?: string; // server-side masked token preview
+  apiTokenMask?: string;
   enabled: boolean;
-  instanceInfo?: XentralInstanceInfo; // populated by connection test
-  syncIntervalH: number; // 0 = manual only
+  instanceInfo?: XentralInstanceInfo;
+  syncIntervalH: number;
+  // Inbound entity toggles
   syncProducts: boolean;
   syncCustomers: boolean;
   syncSuppliers: boolean;
   syncOrders: boolean;
+  syncSalesOrders: boolean;
+  syncPurchasePrices: boolean;
+  syncSalesPrices: boolean;
+  syncWarehouses: boolean;
+  syncStocks: boolean;
+  // Outbound
+  pushProductsToXentral: boolean;
+  pushOrdersToXentral: boolean;
+  // Last sync timestamps
   lastSyncProducts?: string;
   lastSyncCustomers?: string;
   lastSyncSuppliers?: string;
   lastSyncOrders?: string;
+  lastSyncSalesOrders?: string;
+  lastSyncPurchasePrices?: string;
+  lastSyncSalesPrices?: string;
+  lastSyncWarehouses?: string;
+  lastSyncStocks?: string;
+  lastPushOrders?: string;
   webhookToken?: string;
   updatedAt?: string;
 }
 
 export interface XentralConfigSavePayload extends XentralConfig {
-  apiToken?: string; // only send when changing; empty = keep existing
+  apiToken?: string;
 }
+
+export type XentralSyncEntity =
+  | 'products' | 'customers' | 'suppliers' | 'orders'
+  | 'sales_orders' | 'purchase_prices' | 'sales_prices'
+  | 'warehouses' | 'stocks' | 'push_orders';
 
 export interface XentralSyncLog {
   id: string;
   tenantId: string;
-  entity: 'products' | 'customers' | 'suppliers' | 'orders';
+  entity: XentralSyncEntity;
   status: 'running' | 'success' | 'partial' | 'error' | 'skipped';
   created: number;
   updated: number;
@@ -104,7 +125,7 @@ export const xentralApi = {
   importAccount: () =>
     api.post<{ companyProfile: CompanyProfile }>(`${BASE}/import-account`).then(r => r.data),
 
-  syncEntity: (entity: 'products' | 'customers' | 'suppliers' | 'orders') =>
+  syncEntity: (entity: XentralSyncEntity) =>
     api.post<XentralSyncLog>(`${BASE}/sync/${entity}`).then(r => r.data),
 
   syncAll: () =>

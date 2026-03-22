@@ -275,7 +275,7 @@ func (h *XentralHandler) triggerSyncAll(w http.ResponseWriter, r *http.Request) 
 	defer cancel()
 
 	var logs []models.XentralSyncLog
-	for _, entity := range []string{"products", "customers", "suppliers", "orders"} {
+	for _, entity := range []string{"products", "customers", "suppliers", "orders", "warehouses", "stocks", "sales_orders", "purchase_prices", "sales_prices", "push_orders"} {
 		log := h.runSync(syncCtx, tenantID, entity, cfg, client)
 		logs = append(logs, log)
 	}
@@ -507,6 +507,18 @@ func (h *XentralHandler) runSync(ctx context.Context, tenantID primitive.ObjectI
 		}
 		log = h.engine.SyncSalesPrices(ctx, tenantID, client)
 		h.db.XentralConfigs().UpdateOne(ctx, bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncSalesPrices": now}}) //nolint
+	case "warehouses":
+		if !cfg.SyncWarehouses {
+			return skippedLog(tenantID, entity)
+		}
+		log = h.engine.SyncWarehouses(ctx, tenantID, client)
+		h.db.XentralConfigs().UpdateOne(ctx, bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncWarehouses": now}}) //nolint
+	case "stocks":
+		if !cfg.SyncStocks {
+			return skippedLog(tenantID, entity)
+		}
+		log = h.engine.SyncStocks(ctx, tenantID, client)
+		h.db.XentralConfigs().UpdateOne(ctx, bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncStocks": now}}) //nolint
 	default:
 		return skippedLog(tenantID, entity)
 	}

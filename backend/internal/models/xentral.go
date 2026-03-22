@@ -54,6 +54,10 @@ type XentralConfig struct {
 	SyncPurchasePrices  bool `json:"syncPurchasePrices" bson:"syncPurchasePrices"` // EK price lists from Xentral
 	SyncSalesPrices     bool `json:"syncSalesPrices" bson:"syncSalesPrices"`       // VK price lists from Xentral
 
+	// Inbound: warehouse and stock sync
+	SyncWarehouses bool `json:"syncWarehouses" bson:"syncWarehouses"` // Lagerorte + Lagerplätze
+	SyncStocks     bool `json:"syncStocks" bson:"syncStocks"`         // Lagerbestände (undoc. /api/v1/stocks)
+
 	// Outbound toggles (LastSaaS → Xentral)
 	PushProductsToXentral bool `json:"pushProductsToXentral" bson:"pushProductsToXentral"` // EAN + freefields
 	// PushOrdersToXentral: LastSaaS is SPoT for purchase orders.
@@ -69,6 +73,8 @@ type XentralConfig struct {
 	LastSyncSalesOrders    *time.Time `json:"lastSyncSalesOrders,omitempty" bson:"lastSyncSalesOrders,omitempty"`
 	LastSyncPurchasePrices *time.Time `json:"lastSyncPurchasePrices,omitempty" bson:"lastSyncPurchasePrices,omitempty"`
 	LastSyncSalesPrices    *time.Time `json:"lastSyncSalesPrices,omitempty" bson:"lastSyncSalesPrices,omitempty"`
+	LastSyncWarehouses     *time.Time `json:"lastSyncWarehouses,omitempty" bson:"lastSyncWarehouses,omitempty"`
+	LastSyncStocks         *time.Time `json:"lastSyncStocks,omitempty" bson:"lastSyncStocks,omitempty"`
 
 	// WebhookToken is a random token embedded in the Xentral webhook URL so that
 	// only Xentral can trigger real-time sync updates.
