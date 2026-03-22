@@ -303,6 +303,7 @@ func (c *Client) ListSuppliers(ctx context.Context) ([]XSupplier, error) {
 
 // ListPurchaseOrders fetches all purchase orders (Lieferantenbestellungen) from
 // Xentral across all pages using the v3 API.
+// Note: the list endpoint does not include lineItems; use GetPurchaseOrder for full detail.
 func (c *Client) ListPurchaseOrders(ctx context.Context) ([]XPurchaseOrder, error) {
 	var all []XPurchaseOrder
 	for page := 1; ; page++ {
@@ -316,6 +317,21 @@ func (c *Client) ListPurchaseOrders(ctx context.Context) ([]XPurchaseOrder, erro
 		}
 	}
 	return all, nil
+}
+
+// GetPurchaseOrder fetches a single purchase order by ID including its lineItems.
+func (c *Client) GetPurchaseOrder(ctx context.Context, id string) (*XPurchaseOrder, error) {
+	body, err := c.get(ctx, "/api/v3/purchaseOrders/"+id, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Data XPurchaseOrder `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("xentral: decode purchaseOrder %s: %w", id, err)
+	}
+	return &result.Data, nil
 }
 
 // ListSalesOrders fetches all sales orders (Verkaufsaufträge) from Xentral

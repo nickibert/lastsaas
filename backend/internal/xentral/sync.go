@@ -346,7 +346,14 @@ func (e *Engine) SyncOrders(ctx context.Context, tenantID primitive.ObjectID, cl
 	}
 
 	for _, o := range orders {
-		if err := e.upsertOrder(ctx, tenantID, o); err != nil {
+		// The list endpoint does not include lineItems; fetch the full order detail.
+		full, err := client.GetPurchaseOrder(ctx, o.ID)
+		if err != nil {
+			log.Errors = append(log.Errors, fmt.Sprintf("%s: fetch detail: %v", o.ID, err))
+			log.Skipped++
+			continue
+		}
+		if err := e.upsertOrder(ctx, tenantID, *full); err != nil {
 			log.Errors = append(log.Errors, fmt.Sprintf("%s: %v", o.ID, err))
 			log.Skipped++
 		} else {
