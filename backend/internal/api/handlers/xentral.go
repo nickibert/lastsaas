@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -45,6 +47,18 @@ func (h *XentralHandler) RegisterRoutes(s *mux.Router) {
 	ix.HandleFunc("/logs", h.listLogs).Methods(http.MethodGet)
 	ix.HandleFunc("/mappings", h.listMappings).Methods(http.MethodGet)
 	ix.HandleFunc("/import-account", h.importAccount).Methods(http.MethodPost)
+	// Webhook receiver – authenticated by token embedded in the URL.
+	// Register on the parent router (no tenant auth middleware) so Xentral can call it.
+	s.HandleFunc("/integrations/xentral/webhook/{token}", h.receiveWebhook).Methods(http.MethodPost)
+}
+
+// generateWebhookToken creates a 32-byte (64 hex chars) random token.
+func generateWebhookToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -84,14 +98,16 @@ func (h *XentralHandler) saveConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		BaseURL       string `json:"baseUrl"`
-		APIToken      string `json:"apiToken"` // empty = keep existing token
-		Enabled       bool   `json:"enabled"`
-		SyncIntervalH int    `json:"syncIntervalH"`
-		SyncProducts  bool   `json:"syncProducts"`
-		SyncCustomers bool   `json:"syncCustomers"`
-		SyncSuppliers bool   `json:"syncSuppliers"`
-		SyncOrders    bool   `json:"syncOrders"`
+		BaseURL               string `json:"baseUrl"`
+		APIToken              string `json:"apiToken"` // empty = keep existing token
+		Enabled               bool   `json:"enabled"`
+		SyncIntervalH         int    `json:"syncIntervalH"`
+		SyncProducts          bool   `json:"syncProducts"`
+		SyncCustomers         bool   `json:"syncCustomers"`
+		SyncSuppliers         bool   `json:"syncSuppliers"`
+		SyncOrders            bool   `json:"syncOrders"`
+		SyncSalesOrders       bool   `json:"syncSalesOrders"`
+		PushProductsToXentral bool   `json:"pushProductsToXentral"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
@@ -100,17 +116,19 @@ func (h *XentralHandler) saveConfig(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	set := bson.M{
-		"baseUrl":       req.BaseURL,
-		"enabled":       req.Enabled,
-		"syncIntervalH": req.SyncIntervalH,
-		"syncProducts":  req.SyncProducts,
-		"syncCustomers": req.SyncCustomers,
-		"syncSuppliers": req.SyncSuppliers,
-		"syncOrders":    req.SyncOrders,
-		"updatedAt":     now,
+		"baseUrl":               req.BaseURL,
+		"enabled":               req.Enabled,
+		"syncIntervalH":         req.SyncIntervalH,
+		"syncProducts":          req.SyncProducts,
+		"syncCustomers":         req.SyncCustomers,
+		"syncSuppliers":         req.SyncSuppliers,
+		"syncOrders":            req.SyncOrders,
+		"syncSalesOrders":       req.SyncSalesOrders,
+		"pushProductsToXentral": req.PushProductsToXentral,
+		"updatedAt":             now,
 	}
 
-	// Only update the token if a new one is supplied
+	// Only update the API token if a new one is supplied
 	if req.APIToken != "" {
 		set["apiToken"] = req.APIToken
 		mask := "****"
@@ -118,6 +136,15 @@ func (h *XentralHandler) saveConfig(w http.ResponseWriter, r *http.Request) {
 			mask = "****" + req.APIToken[len(req.APIToken)-4:]
 		}
 		set["apiTokenMask"] = mask
+	}
+
+	// Auto-generate a webhook token on first save if none exists yet.
+	var existing models.XentralConfig
+	_ = h.db.XentralConfigs().FindOne(r.Context(), bson.M{"tenantId": tenantID}).Decode(&existing)
+	if existing.WebhookToken == "" {
+		if token, err := generateWebhookToken(); err == nil {
+			set["webhookToken"] = token
+		}
 	}
 
 	_, err := h.db.XentralConfigs().UpdateOne(r.Context(),
@@ -441,6 +468,12 @@ func (h *XentralHandler) runSync(r *http.Request, tenantID primitive.ObjectID, e
 		}
 		log = h.engine.SyncOrders(r.Context(), tenantID, client)
 		h.db.XentralConfigs().UpdateOne(r.Context(), bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncOrders": now}}) //nolint
+	case "sales_orders":
+		if !cfg.SyncSalesOrders {
+			return skippedLog(tenantID, entity)
+		}
+		log = h.engine.SyncSalesOrders(r.Context(), tenantID, client)
+		h.db.XentralConfigs().UpdateOne(r.Context(), bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncSalesOrders": now}}) //nolint
 	default:
 		return skippedLog(tenantID, entity)
 	}
@@ -457,6 +490,70 @@ func skippedLog(tenantID primitive.ObjectID, entity string) models.XentralSyncLo
 		StartedAt:  now,
 		FinishedAt: &now,
 	}
+}
+
+// ---------------------------------------------------------------------------
+// POST /integrations/xentral/webhook/{token}
+// Xentral calls this URL whenever an entity changes (product, customer, etc.).
+// The token in the URL authenticates the call (set in Xentral: Settings → Webhooks).
+// ---------------------------------------------------------------------------
+
+// xentralWebhookPayload is the payload Xentral sends for each webhook event.
+// Xentral sends: {"event": "product.updated", "resourceId": "42", ...}
+type xentralWebhookPayload struct {
+	Event      string `json:"event"`
+	ResourceID string `json:"resourceId"`
+}
+
+func (h *XentralHandler) receiveWebhook(w http.ResponseWriter, r *http.Request) {
+	token := mux.Vars(r)["token"]
+	if token == "" {
+		http.Error(w, "missing token", http.StatusUnauthorized)
+		return
+	}
+
+	// Find the tenant config that owns this webhook token.
+	var cfg models.XentralConfig
+	if err := h.db.XentralConfigs().FindOne(r.Context(),
+		bson.M{"webhookToken": token, "enabled": true},
+	).Decode(&cfg); err != nil {
+		// Return 200 to avoid Xentral retrying with an invalid token.
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	var payload xentralWebhookPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	client := xentral.NewClient(cfg.BaseURL, cfg.APIToken)
+
+	// Map the Xentral event type to a sync entity and trigger a targeted sync.
+	// Run in a goroutine so the webhook response is fast (Xentral has short timeouts).
+	go func() {
+		switch {
+		case isEventType(payload.Event, "product"):
+			h.engine.SyncProducts(r.Context(), cfg.TenantID, client) //nolint
+		case isEventType(payload.Event, "customer"):
+			h.engine.SyncCustomers(r.Context(), cfg.TenantID, client) //nolint
+		case isEventType(payload.Event, "supplier"):
+			h.engine.SyncSuppliers(r.Context(), cfg.TenantID, client) //nolint
+		case isEventType(payload.Event, "purchaseOrder"):
+			h.engine.SyncOrders(r.Context(), cfg.TenantID, client) //nolint
+		case isEventType(payload.Event, "salesOrder"):
+			h.engine.SyncSalesOrders(r.Context(), cfg.TenantID, client) //nolint
+		}
+	}()
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// isEventType checks whether a Xentral event string matches an entity prefix.
+// Xentral events follow the pattern "<entity>.<verb>", e.g. "product.updated".
+func isEventType(event, entity string) bool {
+	return len(event) > len(entity) && event[:len(entity)+1] == entity+"."
 }
 
 func errorf(msg string) error {

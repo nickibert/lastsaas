@@ -768,7 +768,10 @@ func (e *Engine) failLog(ctx context.Context, log models.XentralSyncLog, errMsg 
 	log.Status = "error"
 	log.Errors = []string{errMsg}
 	log.FinishedAt = &now
-	e.db.XentralSyncLogs().UpdateOne(ctx, //nolint
+	// Use a fresh context so the log update is never blocked by a cancelled request context.
+	writeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	e.db.XentralSyncLogs().UpdateOne(writeCtx, //nolint
 		bson.M{"_id": log.ID},
 		bson.M{"$set": bson.M{"status": log.Status, "errors": log.Errors, "finishedAt": log.FinishedAt}},
 	)
@@ -782,7 +785,10 @@ func (e *Engine) finishLog(ctx context.Context, log models.XentralSyncLog) model
 		log.Status = "partial"
 	}
 	log.FinishedAt = &now
-	e.db.XentralSyncLogs().UpdateOne(ctx, //nolint
+	// Use a fresh context so the log update is never blocked by a cancelled request context.
+	writeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	e.db.XentralSyncLogs().UpdateOne(writeCtx, //nolint
 		bson.M{"_id": log.ID},
 		bson.M{"$set": bson.M{
 			"status":     log.Status,
@@ -793,6 +799,7 @@ func (e *Engine) finishLog(ctx context.Context, log models.XentralSyncLog) model
 			"finishedAt": log.FinishedAt,
 		}},
 	)
+	_ = ctx // context was used for the sync work; log write uses its own context above
 	return log
 }
 
