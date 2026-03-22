@@ -317,7 +317,6 @@ export default function OrderDetailPage() {
       }
     }
     const totalVolumeM3 = products.reduce((s, p) => s + p.volumeM3 * p.quantity, 0);
-    const totalQuantity = products.reduce((s, p) => s + p.quantity, 0);
 
     const rows = products.map(p => {
       let relevantFreightEUR: number;
