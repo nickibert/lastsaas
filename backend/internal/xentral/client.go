@@ -43,8 +43,12 @@ func NewClient(baseURL, token string) *Client {
 
 // Ping calls a lightweight endpoint to verify the connection and credentials.
 func (c *Client) Ping(ctx context.Context) error {
-	// Use the products endpoint with limit=1 as a health check
-	_, err := c.get(ctx, "/api/v1/products", url.Values{"limit": []string{"1"}})
+	// Use the products endpoint with page[size]=1 as a health check.
+	// Xentral uses bracket-style pagination parameters (page[number] / page[size]).
+	_, err := c.get(ctx, "/api/v1/products", url.Values{
+		"page[number]": []string{"1"},
+		"page[size]":   []string{"1"},
+	})
 	return err
 }
 
@@ -120,41 +124,48 @@ type XOrderPosition struct {
 	UnitPrice   float64 `json:"unitPrice"`
 }
 
-// paginated is the generic wrapper Xentral uses for list responses.
-type paginated[T any] struct {
-	Data []T    `json:"data"`
-	Meta xMeta  `json:"meta"`
-}
-
-type xMeta struct {
-	Page  int `json:"page"`
-	Limit int `json:"limit"`
-	Total int `json:"total"`
+// xentral wraps list responses – the data is always in "data".
+// We intentionally ignore the meta/pagination object because its field names
+// vary across Xentral versions; instead we stop when a page returns fewer
+// items than requested (standard "last page" heuristic).
+type xList[T any] struct {
+	Data []T `json:"data"`
 }
 
 // -------------------------------------------------------------------
 // Paginated list fetchers
 // -------------------------------------------------------------------
 
+// pageSize is the number of records requested per page.
+// Xentral uses bracket-style pagination: page[number] and page[size].
 const pageSize = 100
+
+// listPage is the shared helper for fetching one page of any resource.
+func listPage[T any](c *Client, ctx context.Context, path string, pageNum int) ([]T, error) {
+	body, err := c.get(ctx, path, url.Values{
+		"page[number]": []string{fmt.Sprintf("%d", pageNum)},
+		"page[size]":   []string{fmt.Sprintf("%d", pageSize)},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var result xList[T]
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("xentral: decode %s page %d: %w", path, pageNum, err)
+	}
+	return result.Data, nil
+}
 
 // ListArticles fetches all articles from Xentral across all pages.
 func (c *Client) ListArticles(ctx context.Context) ([]XArticle, error) {
 	var all []XArticle
 	for page := 1; ; page++ {
-		body, err := c.get(ctx, "/api/v1/products", url.Values{
-			"page":  []string{fmt.Sprintf("%d", page)},
-			"limit": []string{fmt.Sprintf("%d", pageSize)},
-		})
+		batch, err := listPage[XArticle](c, ctx, "/api/v1/products", page)
 		if err != nil {
 			return nil, err
 		}
-		var result paginated[XArticle]
-		if err := json.Unmarshal(body, &result); err != nil {
-			return nil, fmt.Errorf("xentral: decode articles page %d: %w", page, err)
-		}
-		all = append(all, result.Data...)
-		if len(all) >= result.Meta.Total || len(result.Data) == 0 {
+		all = append(all, batch...)
+		if len(batch) < pageSize {
 			break
 		}
 	}
@@ -165,19 +176,12 @@ func (c *Client) ListArticles(ctx context.Context) ([]XArticle, error) {
 func (c *Client) ListCustomers(ctx context.Context) ([]XCustomer, error) {
 	var all []XCustomer
 	for page := 1; ; page++ {
-		body, err := c.get(ctx, "/api/v1/customers", url.Values{
-			"page":  []string{fmt.Sprintf("%d", page)},
-			"limit": []string{fmt.Sprintf("%d", pageSize)},
-		})
+		batch, err := listPage[XCustomer](c, ctx, "/api/v1/customers", page)
 		if err != nil {
 			return nil, err
 		}
-		var result paginated[XCustomer]
-		if err := json.Unmarshal(body, &result); err != nil {
-			return nil, fmt.Errorf("xentral: decode customers page %d: %w", page, err)
-		}
-		all = append(all, result.Data...)
-		if len(all) >= result.Meta.Total || len(result.Data) == 0 {
+		all = append(all, batch...)
+		if len(batch) < pageSize {
 			break
 		}
 	}
@@ -188,19 +192,12 @@ func (c *Client) ListCustomers(ctx context.Context) ([]XCustomer, error) {
 func (c *Client) ListSuppliers(ctx context.Context) ([]XSupplier, error) {
 	var all []XSupplier
 	for page := 1; ; page++ {
-		body, err := c.get(ctx, "/api/v1/suppliers", url.Values{
-			"page":  []string{fmt.Sprintf("%d", page)},
-			"limit": []string{fmt.Sprintf("%d", pageSize)},
-		})
+		batch, err := listPage[XSupplier](c, ctx, "/api/v1/suppliers", page)
 		if err != nil {
 			return nil, err
 		}
-		var result paginated[XSupplier]
-		if err := json.Unmarshal(body, &result); err != nil {
-			return nil, fmt.Errorf("xentral: decode suppliers page %d: %w", page, err)
-		}
-		all = append(all, result.Data...)
-		if len(all) >= result.Meta.Total || len(result.Data) == 0 {
+		all = append(all, batch...)
+		if len(batch) < pageSize {
 			break
 		}
 	}
@@ -211,19 +208,12 @@ func (c *Client) ListSuppliers(ctx context.Context) ([]XSupplier, error) {
 func (c *Client) ListSalesOrders(ctx context.Context) ([]XSalesOrder, error) {
 	var all []XSalesOrder
 	for page := 1; ; page++ {
-		body, err := c.get(ctx, "/api/v1/sales-orders", url.Values{
-			"page":  []string{fmt.Sprintf("%d", page)},
-			"limit": []string{fmt.Sprintf("%d", pageSize)},
-		})
+		batch, err := listPage[XSalesOrder](c, ctx, "/api/v1/sales-orders", page)
 		if err != nil {
 			return nil, err
 		}
-		var result paginated[XSalesOrder]
-		if err := json.Unmarshal(body, &result); err != nil {
-			return nil, fmt.Errorf("xentral: decode sales-orders page %d: %w", page, err)
-		}
-		all = append(all, result.Data...)
-		if len(all) >= result.Meta.Total || len(result.Data) == 0 {
+		all = append(all, batch...)
+		if len(batch) < pageSize {
 			break
 		}
 	}
