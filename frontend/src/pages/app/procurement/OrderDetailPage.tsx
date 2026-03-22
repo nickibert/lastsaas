@@ -344,16 +344,19 @@ export default function OrderDetailPage() {
             <label className={labelCls}>Lieferstatus</label>
             <select value={draft.deliveryStatus ?? 'pending'} onChange={e => set('deliveryStatus', e.target.value)} className={inputCls}>
               <option value="pending">Ausstehend</option>
+              <option value="ordered">Bestellt</option>
               <option value="shipped">Verschifft</option>
-              <option value="delivered">Geliefert</option>
+              <option value="arrived">Angekommen</option>
+              <option value="partial">Teillieferung</option>
             </select>
           </div>
           <div>
             <label className={labelCls}>Zahlstatus</label>
             <select value={draft.paymentStatus ?? 'unpaid'} onChange={e => set('paymentStatus', e.target.value)} className={inputCls}>
               <option value="unpaid">Unbezahlt</option>
-              <option value="partial">Teilbezahlt</option>
-              <option value="paid">Bezahlt</option>
+              <option value="deposit_paid">Anzahlung geleistet</option>
+              <option value="fully_paid">Vollständig bezahlt</option>
+              <option value="overdue">Überfällig</option>
             </select>
           </div>
           <div>

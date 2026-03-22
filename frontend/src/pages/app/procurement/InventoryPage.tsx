@@ -286,9 +286,7 @@ export default function InventoryPage() {
               <tbody className="divide-y divide-dark-800/50">
                 {items.length === 0 ? (
                   <tr><td colSpan={7} className="px-4 py-8 text-center text-dark-400">Keine Buchungen vorhanden</td></tr>
-                ) : items.map((m: StockMovement) => {
-                  const t = typeLabel[m.type] || typeLabel.receipt;
-                  return (
+                ) : items.map((m: StockMovement) => (
                     <tr key={m.id} className="hover:bg-dark-800/30">
                       <td className="px-4 py-3 text-dark-300">
                         {new Date(m.movedAt).toLocaleDateString('de-DE')}
@@ -310,8 +308,7 @@ export default function InventoryPage() {
                         </button>
                       </td>
                     </tr>
-                  );
-                })}
+                ))}
               </tbody>
             </table>
           )}

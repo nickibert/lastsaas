@@ -10,23 +10,29 @@ import { Pagination } from '../../../components/Pagination';
 
 const deliveryBadge: Record<DeliveryStatus, string> = {
   pending: 'bg-dark-700 text-dark-300',
+  ordered: 'bg-indigo-500/20 text-indigo-400',
   shipped: 'bg-blue-500/20 text-blue-400',
-  delivered: 'bg-emerald-500/20 text-emerald-400',
+  arrived: 'bg-teal-500/20 text-teal-400',
+  partial: 'bg-amber-500/20 text-amber-400',
 };
 const deliveryLabel: Record<DeliveryStatus, string> = {
   pending: 'Ausstehend',
+  ordered: 'Bestellt',
   shipped: 'Verschifft',
-  delivered: 'Geliefert',
+  arrived: 'Angekommen',
+  partial: 'Teillieferung',
 };
 const paymentBadge: Record<PaymentStatus, string> = {
   unpaid: 'bg-red-500/20 text-red-400',
-  partial: 'bg-amber-500/20 text-amber-400',
-  paid: 'bg-emerald-500/20 text-emerald-400',
+  deposit_paid: 'bg-amber-500/20 text-amber-400',
+  fully_paid: 'bg-emerald-500/20 text-emerald-400',
+  overdue: 'bg-red-600/30 text-red-300',
 };
 const paymentLabel: Record<PaymentStatus, string> = {
   unpaid: 'Unbezahlt',
-  partial: 'Teilbezahlt',
-  paid: 'Bezahlt',
+  deposit_paid: 'Anzahlung',
+  fully_paid: 'Bezahlt',
+  overdue: 'Überfällig',
 };
 const receiptBadge: Record<ReceiptStatus, string> = {
   pending: 'bg-dark-700 text-dark-300',
