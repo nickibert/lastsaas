@@ -370,6 +370,7 @@ const normalizeOrderDates = (data: Partial<Order>): Partial<Order> => {
     if (f.estimatedArrival && !f.estimatedArrival.includes('T')) f.estimatedArrival = f.estimatedArrival + 'T00:00:00Z';
     if (f.arrival && !f.arrival.includes('T')) f.arrival = f.arrival + 'T00:00:00Z';
     if (f.avisShipperDate && !f.avisShipperDate.includes('T')) f.avisShipperDate = f.avisShipperDate + 'T00:00:00Z';
+    if (f.docOfOrigin && !f.docOfOrigin.includes('T')) f.docOfOrigin = f.docOfOrigin + 'T00:00:00Z';
     p.freight = f;
   }
   return p;

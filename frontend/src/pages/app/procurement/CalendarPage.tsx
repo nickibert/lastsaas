@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, CheckSquare, Ship, Plus, Pencil, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CheckSquare, Ship, Plus, Pencil, Trash2, X, ExternalLink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -436,20 +436,24 @@ export default function CalendarPage() {
                       ))}
                       {ev.arrivals.map(a => (
                         <div key={a.orderId}
-                          className={`text-xs px-1.5 py-0.5 rounded leading-tight flex items-center gap-0.5 group/arrival
-                            ${a.actualDate ? 'bg-teal-500/20 text-teal-400' : 'bg-primary-500/20 text-primary-300'}`}
-                          title={`${a.orderNumber}${a.supplierName ? ' – ' + a.supplierName : ''}`}>
-                          <Link to={`/procurement/orders/${a.orderId}`} className="flex-1 flex items-center gap-0.5 min-w-0 truncate">
-                            <Ship className="w-2.5 h-2.5 flex-shrink-0" />
-                            <span className="truncate">{a.orderNumber}{a.supplierName ? ` – ${a.supplierName}` : ''}</span>
-                          </Link>
+                          className={`text-xs px-1.5 py-0.5 rounded leading-tight flex items-center gap-0.5
+                            ${a.actualDate ? 'bg-teal-500/20 text-teal-400' : 'bg-primary-500/20 text-primary-300'}`}>
                           <button
                             onClick={() => setFreightModalArrival(a)}
-                            className="opacity-0 group-hover/arrival:opacity-100 flex-shrink-0 hover:text-white transition-opacity"
-                            title="Frachtdatum bearbeiten"
+                            className="flex-1 flex items-center gap-0.5 min-w-0 truncate text-left hover:opacity-80"
+                            title={`${a.orderNumber}${a.supplierName ? ' – ' + a.supplierName : ''} — Datum bearbeiten`}
                           >
-                            <Pencil className="w-2.5 h-2.5" />
+                            <Ship className="w-2.5 h-2.5 flex-shrink-0" />
+                            <span className="truncate">{a.orderNumber}{a.supplierName ? ` – ${a.supplierName}` : ''}</span>
                           </button>
+                          <Link
+                            to={`/procurement/orders/${a.orderId}`}
+                            className="flex-shrink-0 hover:opacity-80"
+                            title="Zur Bestellung"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <ExternalLink className="w-2.5 h-2.5" />
+                          </Link>
                         </div>
                       ))}
                       {ev.entries.map(e => (
