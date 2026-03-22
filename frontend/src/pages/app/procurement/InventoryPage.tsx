@@ -250,7 +250,7 @@ export default function InventoryPage() {
                 ) : (levels?.items ?? []).map((l: StockLevel) => (
                   <tr key={l.id} className="hover:bg-dark-800/30">
                     <td className="px-4 py-3">
-                      <Link to="/procurement/products" className="text-white hover:text-primary-400 transition-colors">{productName(l.productId)}</Link>
+                      <Link to={`/procurement/products?highlight=${l.productId}&q=${encodeURIComponent(productName(l.productId))}`} className="text-white hover:text-primary-400 transition-colors">{productName(l.productId)}</Link>
                     </td>
                     <td className={`px-4 py-3 text-right font-mono font-semibold ${l.quantity < 0 ? 'text-red-400' : l.quantity === 0 ? 'text-dark-400' : 'text-emerald-400'}`}>
                       {l.quantity.toLocaleString('de-DE', { maximumFractionDigits: 3 })}
@@ -297,7 +297,7 @@ export default function InventoryPage() {
                         {new Date(m.movedAt).toLocaleDateString('de-DE')}
                       </td>
                       <td className="px-4 py-3">
-                        <Link to="/procurement/products" className="text-white hover:text-primary-400 transition-colors">{productName(m.productId)}</Link>
+                        <Link to={`/procurement/products?highlight=${m.productId}&q=${encodeURIComponent(productName(m.productId))}`} className="text-white hover:text-primary-400 transition-colors">{productName(m.productId)}</Link>
                       </td>
                       <td className="px-4 py-3">
                         <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${tl.color}`}>{tl.label}</span>
@@ -310,7 +310,7 @@ export default function InventoryPage() {
                         {m.orderId
                           ? <><span className="text-dark-500">Bestellung: </span><Link to={`/procurement/orders/${m.orderId}`} className="text-dark-300 hover:text-primary-400 transition-colors">{orderLabel(m.orderId)}</Link></>
                           : m.customerId
-                          ? <><span className="text-dark-500">Kunde: </span><Link to="/procurement/customers" className="text-dark-300 hover:text-primary-400 transition-colors">{customerName(m.customerId)}</Link></>
+                          ? <><span className="text-dark-500">Kunde: </span><Link to={`/procurement/customers?highlight=${m.customerId}`} className="text-dark-300 hover:text-primary-400 transition-colors">{customerName(m.customerId)}</Link></>
                           : '—'}
                       </td>
                       <td className="px-4 py-3 text-dark-500 max-w-[200px] truncate">{m.notes || '—'}</td>

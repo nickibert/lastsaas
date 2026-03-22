@@ -169,12 +169,12 @@ export default function OffersPage() {
                   <td className="px-4 py-3 text-white text-sm font-medium">{o.nameShort}</td>
                   <td className="px-4 py-3 text-sm">
                     {o.supplierId
-                      ? <Link to="/procurement/suppliers" className="text-dark-300 hover:text-primary-400 transition-colors">{supplierName(o.supplierId)}</Link>
+                      ? <Link to={`/procurement/suppliers?highlight=${o.supplierId}`} className="text-dark-300 hover:text-primary-400 transition-colors">{supplierName(o.supplierId)}</Link>
                       : <span className="text-dark-500">—</span>}
                   </td>
                   <td className="px-4 py-3 text-sm">
                     {o.productId
-                      ? <Link to="/procurement/products" className="text-emerald-400 hover:text-emerald-300 transition-colors">✓ Produkt</Link>
+                      ? <Link to={`/procurement/products?highlight=${o.productId}`} className="text-emerald-400 hover:text-emerald-300 transition-colors">✓ Produkt</Link>
                       : <span className="text-dark-500">—</span>}
                   </td>
                   <td className="px-4 py-3 text-right text-dark-300 text-sm font-mono">

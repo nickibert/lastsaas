@@ -249,7 +249,7 @@ export default function OrdersPage() {
                     </td>
                     <td className="px-4 py-3 text-sm">
                       {order.supplierId
-                        ? <Link to="/procurement/suppliers" className="text-dark-300 hover:text-primary-400 transition-colors">{supplierName(order.supplierId)}</Link>
+                        ? <Link to={`/procurement/suppliers?highlight=${order.supplierId}`} className="text-dark-300 hover:text-primary-400 transition-colors">{supplierName(order.supplierId)}</Link>
                         : <span className="text-dark-500">—</span>}
                     </td>
                     <td className="px-4 py-3">

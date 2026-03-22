@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useHighlightRow } from '../../../hooks/useHighlightRow';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Trash2, Pencil, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -63,6 +64,7 @@ export default function CustomersPage() {
     placeholderData: prev => prev,
   });
   const customers = data?.items ?? [];
+  useHighlightRow(customers.length > 0);
   const total = data?.total ?? 0;
 
   const createMut = useMutation({
@@ -195,7 +197,7 @@ export default function CustomersPage() {
               {customers.length === 0 ? (
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-dark-400">Keine Kunden gefunden</td></tr>
               ) : customers.map(c => (
-                <tr key={c.id} className="hover:bg-dark-800/30">
+                <tr key={c.id} data-highlight-id={c.id} className="hover:bg-dark-800/30">
                   <td className="px-4 py-3 text-white font-medium">{c.company}</td>
                   <td className="px-4 py-3 text-dark-300">
                     {[c.firstname, c.lastname].filter(Boolean).join(' ') || '—'}

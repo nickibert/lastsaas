@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useHighlightRow } from '../../../hooks/useHighlightRow';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -262,6 +263,7 @@ export default function ProductsPage() {
   });
 
   const products = data?.items ?? [];
+  useHighlightRow(products.length > 0);
   const total = data?.total ?? 0;
   const pages = data?.pages ?? 1;
 
@@ -509,14 +511,14 @@ export default function ProductsPage() {
               {products.length === 0 ? (
                 <tr><td colSpan={8} className="px-4 py-8 text-center text-dark-400">Keine Produkte gefunden</td></tr>
               ) : products.map(p => (
-                <tr key={p.id} className="hover:bg-dark-800/30">
+                <tr key={p.id} data-highlight-id={p.id} className="hover:bg-dark-800/30">
                   <td className="px-4 py-3 text-white font-mono">{p.nameShort}</td>
                   <td className="px-4 py-3 text-dark-300">{p.ownNameShort || '—'}</td>
                   <td className="px-4 py-3 text-dark-400">{p.nameLong || '—'}</td>
                   <td className="px-4 py-3 text-dark-400 font-mono">{p.ean || '—'}</td>
                   <td className="px-4 py-3 text-sm">
                     {p.goodsGroupId
-                      ? <Link to="/procurement/goods-groups" className="text-dark-300 hover:text-primary-400 transition-colors">
+                      ? <Link to={`/procurement/goods-groups?highlight=${p.goodsGroupId}`} className="text-dark-300 hover:text-primary-400 transition-colors">
                           {goodsGroups.find(g => g.id === p.goodsGroupId)?.name ?? '—'}
                         </Link>
                       : <span className="text-dark-500">—</span>}

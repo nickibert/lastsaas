@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useHighlightRow } from '../../../hooks/useHighlightRow';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Pencil } from 'lucide-react';
@@ -26,6 +27,7 @@ export default function FreightCarriersPage() {
   });
 
   const carriers = data?.items ?? [];
+  useHighlightRow(carriers.length > 0);
   const total = data?.total ?? 0;
   const pages = data?.pages ?? 1;
 
@@ -109,7 +111,7 @@ export default function FreightCarriersPage() {
               {carriers.length === 0 ? (
                 <tr><td colSpan={3} className="px-4 py-8 text-center text-dark-400">Keine Frachtführer</td></tr>
               ) : carriers.map(c => (
-                <tr key={c.id} className="hover:bg-dark-800/30">
+                <tr key={c.id} data-highlight-id={c.id} className="hover:bg-dark-800/30">
                   <td className="px-4 py-3 text-white text-sm font-medium">{c.name}</td>
                   <td className="px-4 py-3 text-dark-300 text-sm">{c.description || '—'}</td>
                   <td className="px-4 py-3 text-right">

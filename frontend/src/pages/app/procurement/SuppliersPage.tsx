@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useHighlightRow } from '../../../hooks/useHighlightRow';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Pencil } from 'lucide-react';
@@ -26,6 +27,7 @@ export default function SuppliersPage() {
   });
 
   const suppliers = data?.items ?? [];
+  useHighlightRow(suppliers.length > 0);
   const total = data?.total ?? 0;
   const pages = data?.pages ?? 1;
 
@@ -147,7 +149,7 @@ export default function SuppliersPage() {
                 <tr><td colSpan={5} className="px-4 py-8 text-center text-dark-400">Keine Lieferanten</td></tr>
               ) : (
                 suppliers.map(s => (
-                  <tr key={s.id} className="hover:bg-dark-800/30">
+                  <tr key={s.id} data-highlight-id={s.id} className="hover:bg-dark-800/30">
                     <td className="px-4 py-3 text-white text-sm font-medium">{s.company}</td>
                     <td className="px-4 py-3 text-dark-300 text-sm">{[s.firstname, s.lastname].filter(Boolean).join(' ') || '—'}</td>
                     <td className="px-4 py-3 text-dark-300 text-sm">{s.email || '—'}</td>

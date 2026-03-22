@@ -351,7 +351,7 @@ export default function OrderDetailPage() {
                 <option value="">— auswählen —</option>
                 {suppliers.map(s => <option key={s.id} value={s.id}>{s.company}</option>)}
               </select>
-              <LinkBtn to="/procurement/suppliers" show={!!draft.supplierId} />
+              <LinkBtn to={`/procurement/suppliers${draft.supplierId ? '?highlight=' + draft.supplierId : ''}`} show={!!draft.supplierId} />
             </div>
           </div>
           <div>
@@ -427,7 +427,7 @@ export default function OrderDetailPage() {
               )}
               {orderProducts.map((op, idx) => (
                 <tr key={idx} className="hover:bg-dark-800/20">
-                  <td className="py-2 pr-3 min-w-[200px] w-full">
+                  <td className="py-2 pr-3 min-w-[200px]">
                     <div className="flex items-center gap-1">
                       <ProductSearch
                         value={op.productId}
@@ -438,7 +438,7 @@ export default function OrderDetailPage() {
                       />
                       {op.productId && (
                         <Link
-                          to={`/procurement/products?q=${encodeURIComponent(productNames[op.productId] ?? '')}`}
+                          to={`/procurement/products?highlight=${op.productId}&q=${encodeURIComponent(productNames[op.productId] ?? '')}`}
                           title="Direkt zum Produkt"
                           target="_blank" rel="noopener noreferrer"
                           className="flex-shrink-0 p-1 text-dark-600 hover:text-primary-400 transition-colors">
@@ -511,7 +511,7 @@ export default function OrderDetailPage() {
                 <option value="">— auswählen —</option>
                 {containers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              <LinkBtn to="/procurement/containers" show={!!freight.containerId} />
+              <LinkBtn to={`/procurement/containers${freight.containerId ? '?highlight=' + freight.containerId : ''}`} show={!!freight.containerId} />
             </div>
           </div>
           <div>
@@ -525,7 +525,7 @@ export default function OrderDetailPage() {
                 <option value="">— auswählen —</option>
                 {freightCarriers.map(fc => <option key={fc.id} value={fc.id}>{fc.name}</option>)}
               </select>
-              <LinkBtn to="/procurement/freight-carriers" show={!!freight.freightCarrierId} />
+              <LinkBtn to={`/procurement/freight-carriers${freight.freightCarrierId ? '?highlight=' + freight.freightCarrierId : ''}`} show={!!freight.freightCarrierId} />
             </div>
           </div>
           <div>
@@ -535,7 +535,7 @@ export default function OrderDetailPage() {
                 <option value="">— auswählen —</option>
                 {harbours.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
               </select>
-              <LinkBtn to="/procurement/harbours" show={!!freight.harbourIdFrom} />
+              <LinkBtn to={`/procurement/harbours${freight.harbourIdFrom ? '?highlight=' + freight.harbourIdFrom : ''}`} show={!!freight.harbourIdFrom} />
             </div>
           </div>
           <div>
@@ -545,7 +545,7 @@ export default function OrderDetailPage() {
                 <option value="">— auswählen —</option>
                 {harbours.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
               </select>
-              <LinkBtn to="/procurement/harbours" show={!!freight.harbourIdTo} />
+              <LinkBtn to={`/procurement/harbours${freight.harbourIdTo ? '?highlight=' + freight.harbourIdTo : ''}`} show={!!freight.harbourIdTo} />
             </div>
           </div>
         </div>

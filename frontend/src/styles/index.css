@@ -83,3 +83,12 @@ body {
 ::-webkit-scrollbar-track { background: var(--color-dark-900); }
 ::-webkit-scrollbar-thumb { background: var(--color-dark-700); border-radius: 9999px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-dark-600); }
+
+/* Entity highlight animation (triggered by useHighlightRow) */
+@keyframes row-flash {
+  0%   { background-color: color-mix(in srgb, var(--color-primary-500) 25%, transparent); }
+  100% { background-color: transparent; }
+}
+.highlight-row {
+  animation: row-flash 2s ease-out forwards;
+}

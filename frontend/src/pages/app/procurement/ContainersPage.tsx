@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useHighlightRow } from '../../../hooks/useHighlightRow';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Pencil } from 'lucide-react';
@@ -26,6 +27,7 @@ export default function ContainersPage() {
   });
 
   const containers = data?.items ?? [];
+  useHighlightRow(containers.length > 0);
   const total = data?.total ?? 0;
   const pages = data?.pages ?? 1;
 
@@ -123,7 +125,7 @@ export default function ContainersPage() {
               {containers.length === 0 ? (
                 <tr><td colSpan={4} className="px-4 py-8 text-center text-dark-400">Keine Container</td></tr>
               ) : containers.map(c => (
-                <tr key={c.id} className="hover:bg-dark-800/30">
+                <tr key={c.id} data-highlight-id={c.id} className="hover:bg-dark-800/30">
                   <td className="px-4 py-3 text-white text-sm font-medium">{c.name}</td>
                   <td className="px-4 py-3 text-dark-300 text-sm">{c.description || '—'}</td>
                   <td className="px-4 py-3 text-right text-dark-300 text-sm font-mono">{c.volumeM3 || '—'}</td>

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useHighlightRow } from '../../../hooks/useHighlightRow';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Pencil } from 'lucide-react';
@@ -26,6 +27,7 @@ export default function GoodsGroupsPage() {
   });
 
   const groups = data?.items ?? [];
+  useHighlightRow(groups.length > 0);
   const total = data?.total ?? 0;
   const pages = data?.pages ?? 1;
 
@@ -109,7 +111,7 @@ export default function GoodsGroupsPage() {
               {groups.length === 0 ? (
                 <tr><td colSpan={3} className="px-4 py-8 text-center text-dark-400">Keine Warengruppen</td></tr>
               ) : groups.map(g => (
-                <tr key={g.id} className="hover:bg-dark-800/30">
+                <tr key={g.id} data-highlight-id={g.id} className="hover:bg-dark-800/30">
                   <td className="px-4 py-3 text-white text-sm">{g.name}</td>
                   <td className="px-4 py-3 text-dark-300 text-sm font-mono">{g.short || '—'}</td>
                   <td className="px-4 py-3 text-right">
