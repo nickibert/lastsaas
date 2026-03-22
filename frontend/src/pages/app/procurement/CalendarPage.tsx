@@ -157,16 +157,25 @@ function FreightDateModal({ arrival, onClose }: FreightDateModalProps) {
     setDate(defaultDateForField(f, arrival));
   };
 
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['calendar'] });
+    qc.invalidateQueries({ queryKey: ['order', arrival.orderId] });
+  };
+
   const mut = useMutation({
     mutationFn: () => ordersApi.patchFreightDate(arrival.orderId, field, date),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['calendar'] });
-      qc.invalidateQueries({ queryKey: ['order', arrival.orderId] });
-      toast.success('Datum gespeichert');
-      onClose();
-    },
+    onSuccess: () => { invalidate(); toast.success('Datum gespeichert'); onClose(); },
     onError: () => toast.error('Fehler beim Speichern'),
   });
+
+  const clearMut = useMutation({
+    mutationFn: () => ordersApi.patchFreightDate(arrival.orderId, field, ''),
+    onSuccess: () => { invalidate(); toast.success('Datum gelöscht'); onClose(); },
+    onError: () => toast.error('Fehler beim Löschen'),
+  });
+
+  const currentDate = defaultDateForField(field, arrival);
+  const isPending = mut.isPending || clearMut.isPending;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -194,16 +203,23 @@ function FreightDateModal({ arrival, onClose }: FreightDateModalProps) {
         </div>
 
         <div>
-          <label className="block text-xs text-dark-400 mb-1">Datum *</label>
+          <label className="block text-xs text-dark-400 mb-1">Datum</label>
           <input type="date" value={date} onChange={e => setDate(e.target.value)} autoFocus
             className="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm focus:outline-none focus:border-primary-500" />
         </div>
 
         <div className="flex gap-3 pt-1">
-          <button onClick={() => mut.mutate()} disabled={!date || mut.isPending}
+          <button onClick={() => mut.mutate()} disabled={!date || isPending}
             className="flex-1 py-2 bg-primary-500 text-white rounded-lg text-sm hover:bg-primary-600 disabled:opacity-50">
             {mut.isPending ? 'Speichert…' : 'Speichern'}
           </button>
+          {currentDate && (
+            <button onClick={() => clearMut.mutate()} disabled={isPending}
+              className="px-4 py-2 bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg text-sm hover:bg-red-500/30 disabled:opacity-50"
+              title="Datum löschen">
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
           <button onClick={onClose} className="flex-1 py-2 bg-dark-700 text-white rounded-lg text-sm hover:bg-dark-600">
             Abbrechen
           </button>

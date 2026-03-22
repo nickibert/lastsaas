@@ -1090,7 +1090,7 @@ func (h *ProcurementHandler) patchOrderFreightDate(w http.ResponseWriter, r *htt
 	}
 	var body struct {
 		Field string `json:"field"`
-		Date  string `json:"date"`
+		Date  string `json:"date"`  // RFC3339 to set, empty string to clear
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
@@ -1104,17 +1104,27 @@ func (h *ProcurementHandler) patchOrderFreightDate(w http.ResponseWriter, r *htt
 		http.Error(w, "invalid field", http.StatusBadRequest)
 		return
 	}
-	t, err := time.Parse(time.RFC3339, body.Date)
-	if err != nil {
-		http.Error(w, "invalid date format", http.StatusBadRequest)
-		return
+	if body.Date == "" {
+		// Clear the field
+		h.db.Orders().UpdateOne(r.Context(),
+			bson.M{"_id": id, "tenantId": tenantID},
+			bson.M{
+				"$unset": bson.M{"freight." + body.Field: ""},
+				"$set":   bson.M{"updatedAt": time.Now().UTC()},
+			}) //nolint
+	} else {
+		t, err := time.Parse(time.RFC3339, body.Date)
+		if err != nil {
+			http.Error(w, "invalid date format", http.StatusBadRequest)
+			return
+		}
+		h.db.Orders().UpdateOne(r.Context(),
+			bson.M{"_id": id, "tenantId": tenantID},
+			bson.M{"$set": bson.M{
+				"freight." + body.Field: t,
+				"updatedAt":             time.Now().UTC(),
+			}}) //nolint
 	}
-	h.db.Orders().UpdateOne(r.Context(),
-		bson.M{"_id": id, "tenantId": tenantID},
-		bson.M{"$set": bson.M{
-			"freight." + body.Field: t,
-			"updatedAt":             time.Now().UTC(),
-		}}) //nolint
 	w.WriteHeader(http.StatusNoContent)
 }
 
