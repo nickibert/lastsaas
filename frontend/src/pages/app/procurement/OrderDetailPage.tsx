@@ -427,16 +427,20 @@ export default function OrderDetailPage() {
               )}
               {orderProducts.map((op, idx) => (
                 <tr key={idx} className="hover:bg-dark-800/20">
-                  <td className="py-2 pr-3 min-w-[200px]">
+                  <td className="py-2 pr-3 min-w-[200px] w-full">
                     <div className="flex items-center gap-1">
                       <ProductSearch
                         value={op.productId}
                         currentName={op.productId ? (productNames[op.productId] ?? op.productId) : undefined}
                         onChange={(id, p) => { updateProduct(idx, 'productId', id); setProductName(id, p); }}
                         supplierId={draft.supplierId}
+                        className="flex-1 min-w-0"
                       />
                       {op.productId && (
-                        <Link to="/procurement/products" title="Produkt öffnen" target="_blank" rel="noopener noreferrer"
+                        <Link
+                          to={`/procurement/products?q=${encodeURIComponent(productNames[op.productId] ?? '')}`}
+                          title="Direkt zum Produkt"
+                          target="_blank" rel="noopener noreferrer"
                           className="flex-shrink-0 p-1 text-dark-600 hover:text-primary-400 transition-colors">
                           <ExternalLink className="w-3.5 h-3.5" />
                         </Link>

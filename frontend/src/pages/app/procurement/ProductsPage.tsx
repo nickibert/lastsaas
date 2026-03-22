@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Trash2, Pencil, Tag, X, SlidersHorizontal } from 'lucide-react';
@@ -228,7 +228,8 @@ export default function ProductsPage() {
   const qc = useQueryClient();
   const { activeTenant } = useTenant();
   const enabled = !!activeTenant;
-  const [search, setSearch] = useState('');
+  const [searchParams] = useSearchParams();
+  const [search, setSearch] = useState(() => searchParams.get('q') ?? '');
   const [supplierFilter, setSupplierFilter] = useState('');
   const [goodsGroupFilter, setGoodsGroupFilter] = useState('');
   const [tagFilter, setTagFilter] = useState('');
