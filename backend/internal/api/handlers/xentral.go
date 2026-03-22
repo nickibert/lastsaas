@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -245,7 +246,11 @@ func (h *XentralHandler) triggerSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log := h.runSync(r, tenantID, entity, cfg, client)
+	// Use a detached context so the sync is not cancelled when the HTTP
+	// connection drops (large catalogs can take several minutes).
+	syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	log := h.runSync(syncCtx, tenantID, entity, cfg, client)
 	writeJSON(w, http.StatusOK, log)
 }
 
@@ -266,9 +271,12 @@ func (h *XentralHandler) triggerSyncAll(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
 	var logs []models.XentralSyncLog
 	for _, entity := range []string{"products", "customers", "suppliers", "orders"} {
-		log := h.runSync(r, tenantID, entity, cfg, client)
+		log := h.runSync(syncCtx, tenantID, entity, cfg, client)
 		logs = append(logs, log)
 	}
 	writeJSON(w, http.StatusOK, logs)
@@ -445,7 +453,7 @@ func (h *XentralHandler) loadClient(r *http.Request, tenantID primitive.ObjectID
 	return cfg, xentral.NewClient(cfg.BaseURL, cfg.APIToken), nil
 }
 
-func (h *XentralHandler) runSync(r *http.Request, tenantID primitive.ObjectID, entity string, cfg models.XentralConfig, client *xentral.Client) models.XentralSyncLog {
+func (h *XentralHandler) runSync(ctx context.Context, tenantID primitive.ObjectID, entity string, cfg models.XentralConfig, client *xentral.Client) models.XentralSyncLog {
 	now := time.Now()
 	var log models.XentralSyncLog
 
@@ -454,51 +462,51 @@ func (h *XentralHandler) runSync(r *http.Request, tenantID primitive.ObjectID, e
 		if !cfg.SyncProducts {
 			return skippedLog(tenantID, entity)
 		}
-		log = h.engine.SyncProducts(r.Context(), tenantID, client)
-		h.db.XentralConfigs().UpdateOne(r.Context(), bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncProducts": now}}) //nolint
+		log = h.engine.SyncProducts(ctx, tenantID, client)
+		h.db.XentralConfigs().UpdateOne(ctx, bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncProducts": now}}) //nolint
 	case "customers":
 		if !cfg.SyncCustomers {
 			return skippedLog(tenantID, entity)
 		}
-		log = h.engine.SyncCustomers(r.Context(), tenantID, client)
-		h.db.XentralConfigs().UpdateOne(r.Context(), bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncCustomers": now}}) //nolint
+		log = h.engine.SyncCustomers(ctx, tenantID, client)
+		h.db.XentralConfigs().UpdateOne(ctx, bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncCustomers": now}}) //nolint
 	case "suppliers":
 		if !cfg.SyncSuppliers {
 			return skippedLog(tenantID, entity)
 		}
-		log = h.engine.SyncSuppliers(r.Context(), tenantID, client)
-		h.db.XentralConfigs().UpdateOne(r.Context(), bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncSuppliers": now}}) //nolint
+		log = h.engine.SyncSuppliers(ctx, tenantID, client)
+		h.db.XentralConfigs().UpdateOne(ctx, bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncSuppliers": now}}) //nolint
 	case "orders":
 		// "orders" = one-time import FROM Xentral (migration). For ongoing sync use "push_orders".
 		if !cfg.SyncOrders {
 			return skippedLog(tenantID, entity)
 		}
-		log = h.engine.SyncOrders(r.Context(), tenantID, client)
-		h.db.XentralConfigs().UpdateOne(r.Context(), bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncOrders": now}}) //nolint
+		log = h.engine.SyncOrders(ctx, tenantID, client)
+		h.db.XentralConfigs().UpdateOne(ctx, bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncOrders": now}}) //nolint
 	case "push_orders":
 		if !cfg.PushOrdersToXentral {
 			return skippedLog(tenantID, entity)
 		}
-		log = h.engine.PushAllOrdersToXentral(r.Context(), tenantID, client)
-		h.db.XentralConfigs().UpdateOne(r.Context(), bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastPushOrders": now}}) //nolint
+		log = h.engine.PushAllOrdersToXentral(ctx, tenantID, client)
+		h.db.XentralConfigs().UpdateOne(ctx, bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastPushOrders": now}}) //nolint
 	case "sales_orders":
 		if !cfg.SyncSalesOrders {
 			return skippedLog(tenantID, entity)
 		}
-		log = h.engine.SyncSalesOrders(r.Context(), tenantID, client)
-		h.db.XentralConfigs().UpdateOne(r.Context(), bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncSalesOrders": now}}) //nolint
+		log = h.engine.SyncSalesOrders(ctx, tenantID, client)
+		h.db.XentralConfigs().UpdateOne(ctx, bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncSalesOrders": now}}) //nolint
 	case "purchase_prices":
 		if !cfg.SyncPurchasePrices {
 			return skippedLog(tenantID, entity)
 		}
-		log = h.engine.SyncPurchasePrices(r.Context(), tenantID, client)
-		h.db.XentralConfigs().UpdateOne(r.Context(), bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncPurchasePrices": now}}) //nolint
+		log = h.engine.SyncPurchasePrices(ctx, tenantID, client)
+		h.db.XentralConfigs().UpdateOne(ctx, bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncPurchasePrices": now}}) //nolint
 	case "sales_prices":
 		if !cfg.SyncSalesPrices {
 			return skippedLog(tenantID, entity)
 		}
-		log = h.engine.SyncSalesPrices(r.Context(), tenantID, client)
-		h.db.XentralConfigs().UpdateOne(r.Context(), bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncSalesPrices": now}}) //nolint
+		log = h.engine.SyncSalesPrices(ctx, tenantID, client)
+		h.db.XentralConfigs().UpdateOne(ctx, bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncSalesPrices": now}}) //nolint
 	default:
 		return skippedLog(tenantID, entity)
 	}
