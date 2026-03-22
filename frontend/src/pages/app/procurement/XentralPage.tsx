@@ -134,8 +134,8 @@ export default function XentralPage() {
   const handleImportAccount = async () => {
     setImportingAccount(true);
     try {
-      const result = await xentralApi.importAccount();
-      toast.success(result.created ? 'Lieferantendatensatz angelegt' : 'Lieferantendatensatz aktualisiert');
+      await xentralApi.importAccount();
+      toast.success('Firmenprofil übernommen');
     } catch {
       toast.error('Import fehlgeschlagen');
     } finally {
@@ -244,10 +244,10 @@ export default function XentralPage() {
                 <button
                   onClick={handleImportAccount}
                   disabled={importingAccount}
-                  title="Firmenstammdaten als Lieferantendatensatz importieren"
+                  title="Firmenstammdaten als eigenes Firmenprofil übernehmen"
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-dark-700 text-dark-300 rounded-lg hover:bg-dark-600 hover:text-white disabled:opacity-50 text-xs">
                   {importingAccount ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                  Firmenstammdaten importieren
+                  Als Firmenprofil übernehmen
                 </button>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-1 text-xs text-dark-400">

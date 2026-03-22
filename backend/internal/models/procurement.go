@@ -156,6 +156,24 @@ type ProductPriceList struct {
 // Procurement tenant config
 // ---------------------------------------------------------------------------
 
+// CompanyProfile holds the tenant's own company master data.
+// Populated manually or imported from a connected ERP (e.g. Xentral /api/settings).
+// Used as the buyer identity on purchase orders, customs declarations, etc.
+type CompanyProfile struct {
+	Name      string `json:"name" bson:"name"`
+	Street    string `json:"street" bson:"street"`
+	ZIP       string `json:"zip" bson:"zip"`
+	City      string `json:"city" bson:"city"`
+	Country   string `json:"country" bson:"country"`
+	Email     string `json:"email" bson:"email"`
+	Phone     string `json:"phone" bson:"phone"`
+	Website   string `json:"website" bson:"website"`
+	TaxID     string `json:"taxId" bson:"taxId"`   // Steuernummer
+	VATID     string `json:"vatId" bson:"vatId"`   // USt-IdNr.
+	Currency  string `json:"currency" bson:"currency"`
+	Language  string `json:"language" bson:"language"`
+}
+
 // ProcurementTenantConfig holds per-tenant procurement settings.
 // EkDbMethode selects which EK value is used for Deckungsbeitrag calculations:
 //
@@ -164,10 +182,11 @@ type ProductPriceList struct {
 //	"lifo"         → LIFO-based unit EK from inventory lots
 //	"weighted_avg" → weighted-average EK across all lots ever received
 type ProcurementTenantConfig struct {
-	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	TenantID    primitive.ObjectID `json:"tenantId" bson:"tenantId"`
-	EkDbMethode string             `json:"ekDbMethode" bson:"ekDbMethode"` // "last"|"fifo"|"lifo"|"weighted_avg"
-	UpdatedAt   time.Time          `json:"updatedAt" bson:"updatedAt"`
+	ID             primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	TenantID       primitive.ObjectID `json:"tenantId" bson:"tenantId"`
+	EkDbMethode    string             `json:"ekDbMethode" bson:"ekDbMethode"` // "last"|"fifo"|"lifo"|"weighted_avg"
+	CompanyProfile *CompanyProfile    `json:"companyProfile,omitempty" bson:"companyProfile,omitempty"`
+	UpdatedAt      time.Time          `json:"updatedAt" bson:"updatedAt"`
 }
 
 // ---------------------------------------------------------------------------

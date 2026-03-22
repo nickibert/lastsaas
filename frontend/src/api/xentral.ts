@@ -6,6 +6,21 @@ const BASE = '/procurement/integrations/xentral';
 // Types
 // -------------------------------------------------------------------
 
+export interface CompanyProfile {
+  name: string;
+  street: string;
+  zip: string;
+  city: string;
+  country: string;
+  email: string;
+  phone: string;
+  website: string;
+  taxId: string;
+  vatId: string;
+  currency: string;
+  language: string;
+}
+
 export interface XentralInstanceInfo {
   companyName: string;
   version: string;
@@ -86,7 +101,7 @@ export const xentralApi = {
     api.post<{ ok: boolean; error?: string; instanceInfo?: XentralInstanceInfo }>(`${BASE}/test`).then(r => r.data),
 
   importAccount: () =>
-    api.post<{ created: boolean; supplierId: string }>(`${BASE}/import-account`).then(r => r.data),
+    api.post<{ companyProfile: CompanyProfile }>(`${BASE}/import-account`).then(r => r.data),
 
   syncEntity: (entity: 'products' | 'customers' | 'suppliers' | 'orders') =>
     api.post<XentralSyncLog>(`${BASE}/sync/${entity}`).then(r => r.data),

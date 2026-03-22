@@ -8,7 +8,6 @@ import (
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"lastsaas/internal/db"
@@ -303,9 +302,10 @@ func (h *XentralHandler) listMappings(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 // POST /integrations/xentral/import-account
 //
-// Creates or updates a Supplier record from the cached Xentral instance info
-// (populated by the connection test). This lets users seed their procurement
-// master data with their own company's address, contact, and tax details.
+// Imports the Xentral instance's own company data into the tenant's
+// CompanyProfile (stored in ProcurementTenantConfig). The account holder of
+// the Xentral instance is the buyer/tenant — not a supplier — so this data
+// belongs in the tenant's own company profile, not in the supplier list.
 // ---------------------------------------------------------------------------
 
 func (h *XentralHandler) importAccount(w http.ResponseWriter, r *http.Request) {
@@ -354,67 +354,43 @@ func (h *XentralHandler) importAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Upsert a Supplier record using a stable xentral-mapping key "__own_account".
-	const ownAccountKey = "__xentral_own_account"
-	var mapping models.XentralMapping
-	mappingErr := h.db.XentralMappings().FindOne(r.Context(), bson.M{
-		"tenantId":  tenantID,
-		"entity":    "supplier",
-		"xentralId": ownAccountKey,
-	}).Decode(&mapping)
+	profile := models.CompanyProfile{
+		Name:     xentral.Truncate(info.CompanyName, 200),
+		Street:   xentral.Truncate(info.Street, 200),
+		ZIP:      xentral.Truncate(info.ZIP, 20),
+		City:     xentral.Truncate(info.City, 100),
+		Country:  xentral.Truncate(info.Country, 50),
+		Email:    xentral.Truncate(info.Email, 120),
+		Phone:    xentral.Truncate(info.Phone, 50),
+		Website:  xentral.Truncate(info.Website, 200),
+		TaxID:    xentral.Truncate(info.TaxID, 50),
+		VATID:    xentral.Truncate(info.VATID, 50),
+		Currency: xentral.Truncate(info.Currency, 10),
+		Language: xentral.Truncate(info.Language, 10),
+	}
 
 	now := time.Now()
-
-	// Build a readable Misc summary from the available fields.
-	misc := buildSupplierMisc(info)
-
-	if mappingErr == mongo.ErrNoDocuments {
-		supplier := models.Supplier{
-			ID:        primitive.NewObjectID(),
-			TenantID:  tenantID,
-			Company:   xentral.Truncate(info.CompanyName, 200),
-			Email:     xentral.Truncate(info.Email, 120),
-			Origin:    xentral.Truncate(info.Country, 50),
-			Misc:      misc,
-			CreatedAt: now,
-			UpdatedAt: now,
-		}
-		if _, err := h.db.Suppliers().InsertOne(r.Context(), supplier); err != nil {
-			http.Error(w, "Fehler beim Anlegen: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		_, _ = h.db.XentralMappings().InsertOne(r.Context(), models.XentralMapping{
-			ID:        primitive.NewObjectID(),
-			TenantID:  tenantID,
-			Entity:    "supplier",
-			LocalID:   supplier.ID,
-			XentralID: ownAccountKey,
-			XentralNr: "EIGENE_FIRMA",
-			CreatedAt: now,
-			UpdatedAt: now,
-		})
-		h.syslog.Log(r.Context(), "medium", "xentral own-account supplier created: "+info.CompanyName)
-		writeJSON(w, http.StatusOK, map[string]any{"created": true, "supplierId": supplier.ID})
-		return
-	}
-	if mappingErr != nil {
+	_, err := h.db.ProcurementTenantConfigs().UpdateOne(r.Context(),
+		bson.M{"tenantId": tenantID},
+		bson.M{
+			"$set": bson.M{
+				"companyProfile": profile,
+				"updatedAt":      now,
+			},
+			"$setOnInsert": bson.M{
+				"tenantId":    tenantID,
+				"ekDbMethode": "last",
+			},
+		},
+		options.Update().SetUpsert(true),
+	)
+	if err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
 
-	// Update existing supplier record
-	_, _ = h.db.Suppliers().UpdateOne(r.Context(),
-		bson.M{"_id": mapping.LocalID, "tenantId": tenantID},
-		bson.M{"$set": bson.M{
-			"company":   xentral.Truncate(info.CompanyName, 200),
-			"email":     xentral.Truncate(info.Email, 120),
-			"origin":    xentral.Truncate(info.Country, 50),
-			"misc":      misc,
-			"updatedAt": now,
-		}},
-	)
-	h.syslog.Log(r.Context(), "low", "xentral own-account supplier updated: "+info.CompanyName)
-	writeJSON(w, http.StatusOK, map[string]any{"created": false, "supplierId": mapping.LocalID})
+	h.syslog.Log(r.Context(), "medium", "xentral company profile imported: "+info.CompanyName)
+	writeJSON(w, http.StatusOK, map[string]any{"companyProfile": profile})
 }
 
 // ---------------------------------------------------------------------------
@@ -470,39 +446,6 @@ func (h *XentralHandler) runSync(r *http.Request, tenantID primitive.ObjectID, e
 	return log
 }
 
-// buildSupplierMisc constructs a human-readable Misc string from Xentral instance info.
-func buildSupplierMisc(info *models.XentralInstanceInfo) string {
-	parts := []string{}
-	if info.Street != "" || info.ZIP != "" || info.City != "" {
-		parts = append(parts, info.Street+" "+info.ZIP+" "+info.City)
-	}
-	if info.Phone != "" {
-		parts = append(parts, "Tel: "+info.Phone)
-	}
-	if info.Website != "" {
-		parts = append(parts, "Web: "+info.Website)
-	}
-	if info.TaxID != "" {
-		parts = append(parts, "StNr: "+info.TaxID)
-	}
-	if info.VATID != "" {
-		parts = append(parts, "USt-IdNr: "+info.VATID)
-	}
-	if info.Version != "" {
-		parts = append(parts, "Xentral "+info.Version+" "+info.Edition)
-	}
-	result := ""
-	for i, p := range parts {
-		if i > 0 {
-			result += " | "
-		}
-		result += p
-	}
-	if len(result) > 500 {
-		result = result[:500]
-	}
-	return result
-}
 
 func skippedLog(tenantID primitive.ObjectID, entity string) models.XentralSyncLog {
 	now := time.Now()
