@@ -1676,12 +1676,12 @@ func (h *ProcurementHandler) getCalendar(w http.ResponseWriter, r *http.Request)
 		orderIDSet[t.OrderID] = struct{}{}
 	}
 
-	// Fetch orders with estimatedArrival or arrival in range
+	// Fetch orders with estimatedArrival or arrival in range (nested in freight)
 	arrivalCursor, err := h.db.Orders().Find(r.Context(), bson.M{
 		"tenantId": tenantID,
 		"$or": bson.A{
-			bson.M{"estimatedArrival": bson.M{"$gte": from, "$lt": to}},
-			bson.M{"arrival": bson.M{"$gte": from, "$lt": to}},
+			bson.M{"freight.estimatedArrival": bson.M{"$gte": from, "$lt": to}},
+			bson.M{"freight.arrival": bson.M{"$gte": from, "$lt": to}},
 		},
 	})
 	if err != nil {
@@ -1758,11 +1758,13 @@ func (h *ProcurementHandler) getCalendar(w http.ResponseWriter, r *http.Request)
 			OrderID:     o.ID.Hex(),
 			OrderNumber: o.OrderNumber,
 		}
-		if o.EstimatedArrival != nil {
-			ca.EstimatedDate = o.EstimatedArrival.Format("2006-01-02")
-		}
-		if o.Arrival != nil {
-			ca.ActualDate = o.Arrival.Format("2006-01-02")
+		if o.Freight != nil {
+			if o.Freight.EstimatedArrival != nil {
+				ca.EstimatedDate = o.Freight.EstimatedArrival.Format("2006-01-02")
+			}
+			if o.Freight.Arrival != nil {
+				ca.ActualDate = o.Freight.Arrival.Format("2006-01-02")
+			}
 		}
 		if o.SupplierID != nil {
 			ca.SupplierName = supplierMap[*o.SupplierID]
