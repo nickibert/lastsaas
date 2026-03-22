@@ -324,6 +324,28 @@ func (m *MongoDB) ensureIndexes() {
 				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "productId", Value: 1}}, Options: options.Index().SetUnique(true)},
 			},
 		},
+		{
+			"sales_orders",
+			[]mongo.IndexModel{
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "date", Value: -1}}},
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "customerId", Value: 1}}, Options: options.Index().SetSparse(true)},
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "xentralDocumentNr", Value: 1}}, Options: options.Index().SetSparse(true)},
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "status", Value: 1}}},
+			},
+		},
+		{
+			"ean_ranges",
+			[]mongo.IndexModel{
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "prefix", Value: 1}}, Options: options.Index().SetUnique(true)},
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "goodsGroupIds", Value: 1}}, Options: options.Index().SetSparse(true)},
+			},
+		},
+		{
+			"product_freefield_defs",
+			[]mongo.IndexModel{
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "fieldIndex", Value: 1}}, Options: options.Index().SetUnique(true)},
+			},
+		},
 	}
 
 	// Collections where unique index failure is a data integrity risk
@@ -597,4 +619,16 @@ func (m *MongoDB) StockMovements() *mongo.Collection {
 
 func (m *MongoDB) StockLevels() *mongo.Collection {
 	return m.Database.Collection("stock_levels")
+}
+
+func (m *MongoDB) SalesOrders() *mongo.Collection {
+	return m.Database.Collection("sales_orders")
+}
+
+func (m *MongoDB) EANRanges() *mongo.Collection {
+	return m.Database.Collection("ean_ranges")
+}
+
+func (m *MongoDB) ProductFreefieldDefs() *mongo.Collection {
+	return m.Database.Collection("product_freefield_defs")
 }

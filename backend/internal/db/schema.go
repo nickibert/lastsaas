@@ -52,6 +52,9 @@ func AllSchemas() []CollectionSchema {
 		usageEventsSchema(),
 		ssoConnectionsSchema(),
 		eventDefinitionsSchema(),
+		salesOrdersSchema(),
+		eanRangesSchema(),
+		productFreefieldDefsSchema(),
 	}
 }
 
@@ -1024,6 +1027,75 @@ func stockLevelsSchema() CollectionSchema {
 					"productId": bson.M{"bsonType": "objectId"},
 					"quantity":  bson.M{"bsonType": "double"},
 					"updatedAt": bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func salesOrdersSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "sales_orders",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "date", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":          bson.M{"bsonType": "objectId"},
+					"customerId":        bson.M{"bsonType": "objectId"},
+					"xentralDocumentNr": bson.M{"bsonType": "string", "maxLength": 64},
+					"externalOrderNr":   bson.M{"bsonType": "string", "maxLength": 128},
+					"date":              bson.M{"bsonType": "date"},
+					"status":            bson.M{"bsonType": "string", "maxLength": 50},
+					"totalNetEur":       bson.M{"bsonType": "double", "minimum": 0},
+					"totalGrossEur":     bson.M{"bsonType": "double", "minimum": 0},
+					"currency":          bson.M{"bsonType": "string", "minLength": 3, "maxLength": 3},
+					"createdAt":         bson.M{"bsonType": "date"},
+					"updatedAt":         bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func eanRangesSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "ean_ranges",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "name", "prefix", "nextNumber", "maxNumber", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":   bson.M{"bsonType": "objectId"},
+					"name":       bson.M{"bsonType": "string", "minLength": 1, "maxLength": 100},
+					"prefix":     bson.M{"bsonType": "string", "minLength": 7, "maxLength": 11},
+					"nextNumber": bson.M{"bsonType": "int", "minimum": 1},
+					"maxNumber":  bson.M{"bsonType": "int", "minimum": 1},
+					"notes":      bson.M{"bsonType": "string", "maxLength": 500},
+					"createdAt":  bson.M{"bsonType": "date"},
+					"updatedAt":  bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func productFreefieldDefsSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "product_freefield_defs",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "fieldIndex", "label", "fieldType", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":    bson.M{"bsonType": "objectId"},
+					"fieldIndex":  bson.M{"bsonType": "int", "minimum": 1, "maximum": 10},
+					"label":       bson.M{"bsonType": "string", "minLength": 1, "maxLength": 100},
+					"description": bson.M{"bsonType": "string", "maxLength": 500},
+					"fieldType":   bson.M{"bsonType": "string", "enum": bson.A{"text", "number", "date", "boolean"}},
+					"xentralKey":  bson.M{"bsonType": "string", "maxLength": 50},
+					"createdAt":   bson.M{"bsonType": "date"},
+					"updatedAt":   bson.M{"bsonType": "date"},
 				},
 			},
 		},

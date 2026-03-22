@@ -12,6 +12,7 @@
 package xentral
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -316,6 +317,42 @@ func (c *Client) ListPurchaseOrders(ctx context.Context) ([]XPurchaseOrder, erro
 	return all, nil
 }
 
+// ListSalesOrders fetches all sales orders (Verkaufsaufträge) from Xentral
+// across all pages using the v3 API.
+// The v3 salesOrders endpoint requires the feature flag "api-v3-sales-orders" on the instance.
+func (c *Client) ListSalesOrders(ctx context.Context) ([]XSalesOrder, error) {
+	var all []XSalesOrder
+	for page := 1; ; page++ {
+		batch, err := listPage[XSalesOrder](c, ctx, "/api/v3/salesOrders", page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < pageSize {
+			break
+		}
+	}
+	return all, nil
+}
+
+// PatchProductEAN pushes an EAN barcode back to the matching Xentral article.
+// Uses PATCH /api/v1/products/{xentralArticleID}.
+// This is called after we allocate a new EAN from an EANRange so Xentral stays in sync.
+func (c *Client) PatchProductEAN(ctx context.Context, xentralArticleID, ean string) error {
+	body := map[string]string{"ean": ean}
+	return c.patch(ctx, "/api/v1/products/"+xentralArticleID, body)
+}
+
+// PatchProductFreefields pushes freefield values (freifeld1…freifeld10) back to a Xentral article.
+// freefields is a map from Xentral key (e.g. "freifeld1") to value string.
+func (c *Client) PatchProductFreefields(ctx context.Context, xentralArticleID string, freefields map[string]string) error {
+	payload := make(map[string]interface{}, len(freefields))
+	for k, v := range freefields {
+		payload[k] = v
+	}
+	return c.patch(ctx, "/api/v1/products/"+xentralArticleID, payload)
+}
+
 // -------------------------------------------------------------------
 // HTTP helper
 // -------------------------------------------------------------------
@@ -367,4 +404,100 @@ func (c *Client) get(ctx context.Context, path string, params url.Values) ([]byt
 		return nil, fmt.Errorf("xentral: HTTP %d from %s: %s", resp.StatusCode, path, string(body))
 	}
 	return body, nil
+}
+
+func (c *Client) patch(ctx context.Context, path string, payload interface{}) error {
+	c.mu.Lock()
+	if wait := c.minInterval - time.Since(c.lastReqAt); wait > 0 {
+		c.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+		c.mu.Lock()
+	}
+	c.lastReqAt = time.Now()
+	c.mu.Unlock()
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("xentral: marshal patch body: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, c.baseURL+path, bytes.NewReader(b))
+	if err != nil {
+		return fmt.Errorf("xentral: build patch request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("xentral: patch %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("xentral: unauthorized – check API token")
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return fmt.Errorf("xentral: rate limit reached")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("xentral: HTTP %d from %s: %s", resp.StatusCode, path, string(body))
+	}
+	return nil
+}
+
+// -------------------------------------------------------------------
+// Sales Order types (v3)
+// -------------------------------------------------------------------
+
+// XSalesOrder represents an outbound sales order (Verkaufsauftrag) from Xentral v3.
+// The v3 endpoint requires feature flag "api-v3-sales-orders" on the instance.
+type XSalesOrder struct {
+	ID                  string          `json:"id"`
+	DocumentNumber      string          `json:"documentNumber"`
+	ExternalOrderNumber string          `json:"externalOrderNumber"`
+	Date                string          `json:"date"`
+	Status              string          `json:"status"`
+	Customer            XSOCustomer     `json:"customer"`
+	LineItems           []XSOLineItem   `json:"lineItems"`
+	NetSales            XSOAmount       `json:"netSales"`
+	Total               XSOAmount       `json:"total"`
+	Currency            string          `json:"currency"`
+}
+
+type XSOCustomer struct {
+	ID     string `json:"id"`
+	Number string `json:"number"`
+}
+
+// XSOLineItem is one line in a Xentral v3 sales order.
+type XSOLineItem struct {
+	ID          string     `json:"id"`
+	Article     XSOArticle `json:"article"`
+	Description string     `json:"description"`
+	Quantity    float64    `json:"quantity"`
+	UnitPrice   float64    `json:"unitPrice"`
+}
+
+type XSOArticle struct {
+	ID            string `json:"id"`
+	ArticleNumber string `json:"articleNumber"`
+}
+
+// XSOAmount is a monetary value as returned by the v3 sales orders API.
+// Xentral returns amount as a string in some versions.
+type XSOAmount struct {
+	Amount   json.Number `json:"amount"`
+	Currency string      `json:"currency"`
+}
+
+// Float64 converts the amount to float64, returning 0 on parse error.
+func (a XSOAmount) Float64() float64 {
+	f, _ := a.Amount.Float64()
+	return f
 }

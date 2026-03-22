@@ -43,17 +43,27 @@ type XentralConfig struct {
 	// Sync interval in hours; 0 = manual only
 	SyncIntervalH int `json:"syncIntervalH" bson:"syncIntervalH"`
 
-	// Entity toggles
-	SyncProducts  bool `json:"syncProducts" bson:"syncProducts"`
-	SyncCustomers bool `json:"syncCustomers" bson:"syncCustomers"`
-	SyncSuppliers bool `json:"syncSuppliers" bson:"syncSuppliers"`
-	SyncOrders    bool `json:"syncOrders" bson:"syncOrders"`
+	// Entity toggles (inbound: Xentral → LastSaaS)
+	SyncProducts     bool `json:"syncProducts" bson:"syncProducts"`
+	SyncCustomers    bool `json:"syncCustomers" bson:"syncCustomers"`
+	SyncSuppliers    bool `json:"syncSuppliers" bson:"syncSuppliers"`
+	SyncOrders       bool `json:"syncOrders" bson:"syncOrders"`       // purchase orders
+	SyncSalesOrders  bool `json:"syncSalesOrders" bson:"syncSalesOrders"` // sales orders (for reorder planning)
+
+	// Outbound toggle (LastSaaS → Xentral): push EAN + freefields back to Xentral
+	PushProductsToXentral bool `json:"pushProductsToXentral" bson:"pushProductsToXentral"`
 
 	// Last successful sync timestamps per entity
-	LastSyncProducts  *time.Time `json:"lastSyncProducts,omitempty" bson:"lastSyncProducts,omitempty"`
-	LastSyncCustomers *time.Time `json:"lastSyncCustomers,omitempty" bson:"lastSyncCustomers,omitempty"`
-	LastSyncSuppliers *time.Time `json:"lastSyncSuppliers,omitempty" bson:"lastSyncSuppliers,omitempty"`
-	LastSyncOrders    *time.Time `json:"lastSyncOrders,omitempty" bson:"lastSyncOrders,omitempty"`
+	LastSyncProducts    *time.Time `json:"lastSyncProducts,omitempty" bson:"lastSyncProducts,omitempty"`
+	LastSyncCustomers   *time.Time `json:"lastSyncCustomers,omitempty" bson:"lastSyncCustomers,omitempty"`
+	LastSyncSuppliers   *time.Time `json:"lastSyncSuppliers,omitempty" bson:"lastSyncSuppliers,omitempty"`
+	LastSyncOrders      *time.Time `json:"lastSyncOrders,omitempty" bson:"lastSyncOrders,omitempty"`
+	LastSyncSalesOrders *time.Time `json:"lastSyncSalesOrders,omitempty" bson:"lastSyncSalesOrders,omitempty"`
+
+	// WebhookToken is a random token embedded in the Xentral webhook URL so that
+	// only Xentral can trigger real-time sync updates.
+	// URL pattern: POST /api/procurement/integrations/xentral/webhook/{webhookToken}
+	WebhookToken string `json:"webhookToken,omitempty" bson:"webhookToken,omitempty"`
 
 	UpdatedAt time.Time `json:"updatedAt" bson:"updatedAt"`
 }
@@ -63,7 +73,7 @@ type XentralConfig struct {
 type XentralMapping struct {
 	ID        primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	TenantID  primitive.ObjectID `json:"tenantId" bson:"tenantId"`
-	Entity    string             `json:"entity" bson:"entity"` // "product"|"customer"|"supplier"|"order"
+	Entity    string             `json:"entity" bson:"entity"` // "product"|"customer"|"supplier"|"order"|"sales_order"
 	LocalID   primitive.ObjectID `json:"localId" bson:"localId"`
 	XentralID string             `json:"xentralId" bson:"xentralId"` // Xentral UUID
 	XentralNr string             `json:"xentralNr,omitempty" bson:"xentralNr,omitempty"` // e.g. "ART-001"

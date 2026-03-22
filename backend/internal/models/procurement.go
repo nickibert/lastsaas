@@ -1,6 +1,8 @@
 package models
 
 import (
+	"fmt"
+	"strconv"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -71,6 +73,7 @@ type GoodsGroup struct {
 	TenantID  primitive.ObjectID `json:"tenantId" bson:"tenantId" validate:"required"`
 	Name      string             `json:"name" bson:"name" validate:"required,min=1,max=100"`
 	Short     string             `json:"short" bson:"short" validate:"required,min=1,max=10"`
+	Tags      []string           `json:"tags,omitempty" bson:"tags,omitempty"`
 	LegacyID  int                `json:"legacyId,omitempty" bson:"legacyId,omitempty"`
 	CreatedAt time.Time          `json:"createdAt" bson:"createdAt"`
 	UpdatedAt time.Time          `json:"updatedAt" bson:"updatedAt"`
@@ -520,7 +523,134 @@ type CalendarEntry struct {
 	Notes     string             `json:"notes,omitempty" bson:"notes,omitempty" validate:"omitempty,max=1000"`
 	Date      time.Time          `json:"date" bson:"date" validate:"required"`
 	// type: reminder | milestone | appointment | deadline
-	EntryType string `json:"entryType" bson:"entryType" validate:"required,oneof=reminder milestone appointment deadline"`
+	EntryType string    `json:"entryType" bson:"entryType" validate:"required,oneof=reminder milestone appointment deadline"`
 	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt" bson:"updatedAt"`
+}
+
+// ---------------------------------------------------------------------------
+// Sales Orders (Verkaufsaufträge) – synced from Xentral, read-only
+// Used for reorder planning: knowing what customers ordered helps determine
+// when to place new purchase orders.
+// ---------------------------------------------------------------------------
+
+// SalesOrderLineItem is one position in a sales order.
+// ProductID may be nil when the Xentral article is not yet mapped locally.
+type SalesOrderLineItem struct {
+	ProductID        *primitive.ObjectID `json:"productId,omitempty" bson:"productId,omitempty"`
+	XentralArticleID string              `json:"xentralArticleId,omitempty" bson:"xentralArticleId,omitempty"`
+	Description      string              `json:"description,omitempty" bson:"description,omitempty" validate:"omitempty,max=500"`
+	Quantity         float64             `json:"quantity" bson:"quantity" validate:"min=0"`
+	UnitPriceEUR     float64             `json:"unitPriceEur" bson:"unitPriceEur" validate:"min=0"`
+	TotalPriceEUR    float64             `json:"totalPriceEur" bson:"totalPriceEur" validate:"min=0"`
+}
+
+// SalesOrder represents an outbound sales order (Verkaufsauftrag) from Xentral.
+// status: open | released | shipped | cancelled | completed
+type SalesOrder struct {
+	ID                   primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
+	TenantID             primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
+	CustomerID           *primitive.ObjectID `json:"customerId,omitempty" bson:"customerId,omitempty"`
+	XentralDocumentNr    string              `json:"xentralDocumentNr,omitempty" bson:"xentralDocumentNr,omitempty" validate:"omitempty,max=64"`
+	ExternalOrderNr      string              `json:"externalOrderNr,omitempty" bson:"externalOrderNr,omitempty" validate:"omitempty,max=128"`
+	Date                 time.Time           `json:"date" bson:"date" validate:"required"`
+	Status               string              `json:"status,omitempty" bson:"status,omitempty" validate:"omitempty,max=50"`
+	LineItems            []SalesOrderLineItem `json:"lineItems,omitempty" bson:"lineItems,omitempty"`
+	TotalNetEUR          float64             `json:"totalNetEur" bson:"totalNetEur" validate:"min=0"`
+	TotalGrossEUR        float64             `json:"totalGrossEur" bson:"totalGrossEur" validate:"min=0"`
+	Currency             string              `json:"currency,omitempty" bson:"currency,omitempty" validate:"omitempty,len=3"`
+	Tags                 []string            `json:"tags,omitempty" bson:"tags,omitempty"`
+	LegacyID             int                 `json:"legacyId,omitempty" bson:"legacyId,omitempty"`
+	CreatedAt            time.Time           `json:"createdAt" bson:"createdAt"`
+	UpdatedAt            time.Time           `json:"updatedAt" bson:"updatedAt"`
+}
+
+// ---------------------------------------------------------------------------
+// EAN Number Ranges (GS1-Nummernkreise)
+// Xentral has removed this feature; we provide it as a USP.
+// An EANRange manages a GS1 company prefix and allocates sequential EAN-13 barcodes.
+// Multiple ranges can exist per tenant; each can be assigned to one or more GoodsGroups.
+// ---------------------------------------------------------------------------
+
+// EANRange manages a sequential EAN-13 number space within a GS1 company prefix.
+// The full EAN-13 is built as: Prefix + zero-padded item number + check digit.
+// Prefix length + item number width must equal 12 (check digit is the 13th).
+type EANRange struct {
+	ID            primitive.ObjectID   `json:"id" bson:"_id,omitempty"`
+	TenantID      primitive.ObjectID   `json:"tenantId" bson:"tenantId" validate:"required"`
+	Name          string               `json:"name" bson:"name" validate:"required,min=1,max=100"`
+	// GS1 company prefix (7–11 digits; determines how many product numbers are available).
+	Prefix        string               `json:"prefix" bson:"prefix" validate:"required,min=7,max=11,numeric"`
+	// NextNumber is the next item number to issue within this prefix.
+	// It is incremented atomically on every allocation.
+	NextNumber    int                  `json:"nextNumber" bson:"nextNumber" validate:"min=1"`
+	// MaxNumber is the last item number in this range (inclusive).
+	MaxNumber     int                  `json:"maxNumber" bson:"maxNumber" validate:"min=1"`
+	GoodsGroupIDs []primitive.ObjectID `json:"goodsGroupIds,omitempty" bson:"goodsGroupIds,omitempty"`
+	Notes         string               `json:"notes,omitempty" bson:"notes,omitempty" validate:"omitempty,max=500"`
+	LegacyID      int                  `json:"legacyId,omitempty" bson:"legacyId,omitempty"`
+	CreatedAt     time.Time            `json:"createdAt" bson:"createdAt"`
+	UpdatedAt     time.Time            `json:"updatedAt" bson:"updatedAt"`
+}
+
+// EAN13CheckDigit computes the GS1 check digit for a 12-digit string.
+// Returns -1 if the input is not exactly 12 ASCII digits.
+func EAN13CheckDigit(digits12 string) int {
+	if len(digits12) != 12 {
+		return -1
+	}
+	sum := 0
+	for i, ch := range digits12 {
+		d, err := strconv.Atoi(string(ch))
+		if err != nil {
+			return -1
+		}
+		if i%2 == 0 {
+			sum += d
+		} else {
+			sum += d * 3
+		}
+	}
+	return (10 - (sum % 10)) % 10
+}
+
+// FormatEAN13 assembles the full EAN-13 string from a prefix and item number.
+// The item number is zero-padded to fill the remaining digits (12 - len(prefix)).
+// Returns an error when the prefix length and item number don't fit in 12 digits.
+func FormatEAN13(prefix string, itemNumber int) (string, error) {
+	itemWidth := 12 - len(prefix)
+	if itemWidth < 1 {
+		return "", fmt.Errorf("prefix too long: must be at most 11 digits")
+	}
+	itemStr := fmt.Sprintf("%0*d", itemWidth, itemNumber)
+	if len(itemStr) > itemWidth {
+		return "", fmt.Errorf("item number %d overflows %d-digit field for prefix %q", itemNumber, itemWidth, prefix)
+	}
+	base12 := prefix + itemStr
+	check := EAN13CheckDigit(base12)
+	if check < 0 {
+		return "", fmt.Errorf("invalid base-12 digits: %q", base12)
+	}
+	return fmt.Sprintf("%s%d", base12, check), nil
+}
+
+// ---------------------------------------------------------------------------
+// Product Freefield Definitions (Produktfreifeld-Definitionen)
+// Labels and metadata for UserDef01-10 on the Product struct.
+// Stored per tenant so different tenants can use their own labels.
+// ---------------------------------------------------------------------------
+
+// ProductFreefieldDef defines the label and type for one UserDef field (1–10).
+// fieldType: "text" | "number" | "date" | "boolean"
+// xentralKey: the Xentral freefield key, e.g. "freifeld1" (for bidirectional sync)
+type ProductFreefieldDef struct {
+	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	TenantID    primitive.ObjectID `json:"tenantId" bson:"tenantId" validate:"required"`
+	FieldIndex  int                `json:"fieldIndex" bson:"fieldIndex" validate:"required,min=1,max=10"`
+	Label       string             `json:"label" bson:"label" validate:"required,min=1,max=100"`
+	Description string             `json:"description,omitempty" bson:"description,omitempty" validate:"omitempty,max=500"`
+	FieldType   string             `json:"fieldType" bson:"fieldType" validate:"required,oneof=text number date boolean"`
+	XentralKey  string             `json:"xentralKey,omitempty" bson:"xentralKey,omitempty" validate:"omitempty,max=50"`
+	CreatedAt   time.Time          `json:"createdAt" bson:"createdAt"`
+	UpdatedAt   time.Time          `json:"updatedAt" bson:"updatedAt"`
 }
