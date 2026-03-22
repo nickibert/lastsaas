@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, ArrowDownToLine, ArrowUpFromLine, BarChart3 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -248,7 +249,9 @@ export default function InventoryPage() {
                   <tr><td colSpan={5} className="px-4 py-8 text-center text-dark-400">Keine Lagerbestände vorhanden</td></tr>
                 ) : (levels?.items ?? []).map((l: StockLevel) => (
                   <tr key={l.id} className="hover:bg-dark-800/30">
-                    <td className="px-4 py-3 text-white">{productName(l.productId)}</td>
+                    <td className="px-4 py-3">
+                      <Link to="/procurement/products" className="text-white hover:text-primary-400 transition-colors">{productName(l.productId)}</Link>
+                    </td>
                     <td className={`px-4 py-3 text-right font-mono font-semibold ${l.quantity < 0 ? 'text-red-400' : l.quantity === 0 ? 'text-dark-400' : 'text-emerald-400'}`}>
                       {l.quantity.toLocaleString('de-DE', { maximumFractionDigits: 3 })}
                     </td>
@@ -293,7 +296,9 @@ export default function InventoryPage() {
                       <td className="px-4 py-3 text-dark-300">
                         {new Date(m.movedAt).toLocaleDateString('de-DE')}
                       </td>
-                      <td className="px-4 py-3 text-white">{productName(m.productId)}</td>
+                      <td className="px-4 py-3">
+                        <Link to="/procurement/products" className="text-white hover:text-primary-400 transition-colors">{productName(m.productId)}</Link>
+                      </td>
                       <td className="px-4 py-3">
                         <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${tl.color}`}>{tl.label}</span>
                       </td>
@@ -302,8 +307,11 @@ export default function InventoryPage() {
                       </td>
                       <td className="px-4 py-3 text-dark-300">{m.unit || 'Stk'}</td>
                       <td className="px-4 py-3 text-dark-400">
-                        {m.orderId ? `Bestellung: ${orderLabel(m.orderId)}` :
-                         m.customerId ? `Kunde: ${customerName(m.customerId)}` : '—'}
+                        {m.orderId
+                          ? <><span className="text-dark-500">Bestellung: </span><Link to={`/procurement/orders/${m.orderId}`} className="text-dark-300 hover:text-primary-400 transition-colors">{orderLabel(m.orderId)}</Link></>
+                          : m.customerId
+                          ? <><span className="text-dark-500">Kunde: </span><Link to="/procurement/customers" className="text-dark-300 hover:text-primary-400 transition-colors">{customerName(m.customerId)}</Link></>
+                          : '—'}
                       </td>
                       <td className="px-4 py-3 text-dark-500 max-w-[200px] truncate">{m.notes || '—'}</td>
                       <td className="px-4 py-3 text-right">

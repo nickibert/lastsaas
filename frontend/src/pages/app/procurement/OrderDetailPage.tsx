@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Save, Plus, Trash2, Check, X, Calculator, Pencil, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, Check, X, Calculator, Pencil, RefreshCw, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   ordersApi, suppliersApi, productsApi, containersApi, harboursApi, freightCarriersApi,
@@ -12,6 +12,17 @@ import { useTenant } from '../../../contexts/TenantContext';
 
 const inputCls = 'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm focus:outline-none focus:border-primary-500';
 const labelCls = 'block text-xs text-dark-400 mb-1';
+
+/** Small icon link shown next to a select when a value is selected */
+function LinkBtn({ to, show = true }: { to: string; show?: boolean }) {
+  if (!show) return null;
+  return (
+    <Link to={to} title="Öffnen" target="_blank" rel="noopener noreferrer"
+      className="flex-shrink-0 self-end mb-0.5 p-2 text-dark-500 hover:text-primary-400 transition-colors">
+      <ExternalLink className="w-4 h-4" />
+    </Link>
+  );
+}
 
 // Frankfurter API (EZB data, no key required)
 // Returns USD per 1 EUR (= dollarRate in our model)
@@ -335,10 +346,13 @@ export default function OrderDetailPage() {
           <DateInput label="Bestelldatum" value={draft.orderDate} onChange={v => set('orderDate', v)} />
           <div>
             <label className={labelCls}>Lieferant</label>
-            <select value={draft.supplierId ?? ''} onChange={e => set('supplierId', e.target.value || undefined)} className={inputCls}>
-              <option value="">— auswählen —</option>
-              {suppliers.map(s => <option key={s.id} value={s.id}>{s.company}</option>)}
-            </select>
+            <div className="flex items-end gap-1">
+              <select value={draft.supplierId ?? ''} onChange={e => set('supplierId', e.target.value || undefined)} className={inputCls}>
+                <option value="">— auswählen —</option>
+                {suppliers.map(s => <option key={s.id} value={s.id}>{s.company}</option>)}
+              </select>
+              <LinkBtn to="/procurement/suppliers" show={!!draft.supplierId} />
+            </div>
           </div>
           <div>
             <label className={labelCls}>Lieferstatus</label>
@@ -414,12 +428,20 @@ export default function OrderDetailPage() {
               {orderProducts.map((op, idx) => (
                 <tr key={idx} className="hover:bg-dark-800/20">
                   <td className="py-2 pr-3 min-w-[200px]">
-                    <ProductSearch
-                      value={op.productId}
-                      currentName={op.productId ? (productNames[op.productId] ?? op.productId) : undefined}
-                      onChange={(id, p) => { updateProduct(idx, 'productId', id); setProductName(id, p); }}
-                      supplierId={draft.supplierId}
-                    />
+                    <div className="flex items-center gap-1">
+                      <ProductSearch
+                        value={op.productId}
+                        currentName={op.productId ? (productNames[op.productId] ?? op.productId) : undefined}
+                        onChange={(id, p) => { updateProduct(idx, 'productId', id); setProductName(id, p); }}
+                        supplierId={draft.supplierId}
+                      />
+                      {op.productId && (
+                        <Link to="/procurement/products" title="Produkt öffnen" target="_blank" rel="noopener noreferrer"
+                          className="flex-shrink-0 p-1 text-dark-600 hover:text-primary-400 transition-colors">
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </Link>
+                      )}
+                    </div>
                   </td>
                   <td className="py-2 pr-3">
                     <input type="number" step="1" min="1" value={op.quantity}
@@ -480,10 +502,13 @@ export default function OrderDetailPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className={labelCls}>Container</label>
-            <select value={freight.containerId ?? ''} onChange={e => setFreight('containerId', e.target.value)} className={inputCls}>
-              <option value="">— auswählen —</option>
-              {containers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <div className="flex items-end gap-1">
+              <select value={freight.containerId ?? ''} onChange={e => setFreight('containerId', e.target.value)} className={inputCls}>
+                <option value="">— auswählen —</option>
+                {containers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <LinkBtn to="/procurement/containers" show={!!freight.containerId} />
+            </div>
           </div>
           <div>
             <label className={labelCls}>Container-Nr.</label>
@@ -491,24 +516,33 @@ export default function OrderDetailPage() {
           </div>
           <div>
             <label className={labelCls}>Frachtführer</label>
-            <select value={freight.freightCarrierId ?? ''} onChange={e => setFreight('freightCarrierId', e.target.value)} className={inputCls}>
-              <option value="">— auswählen —</option>
-              {freightCarriers.map(fc => <option key={fc.id} value={fc.id}>{fc.name}</option>)}
-            </select>
+            <div className="flex items-end gap-1">
+              <select value={freight.freightCarrierId ?? ''} onChange={e => setFreight('freightCarrierId', e.target.value)} className={inputCls}>
+                <option value="">— auswählen —</option>
+                {freightCarriers.map(fc => <option key={fc.id} value={fc.id}>{fc.name}</option>)}
+              </select>
+              <LinkBtn to="/procurement/freight-carriers" show={!!freight.freightCarrierId} />
+            </div>
           </div>
           <div>
             <label className={labelCls}>Hafen ab</label>
-            <select value={freight.harbourIdFrom ?? ''} onChange={e => setFreight('harbourIdFrom', e.target.value)} className={inputCls}>
-              <option value="">— auswählen —</option>
-              {harbours.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
-            </select>
+            <div className="flex items-end gap-1">
+              <select value={freight.harbourIdFrom ?? ''} onChange={e => setFreight('harbourIdFrom', e.target.value)} className={inputCls}>
+                <option value="">— auswählen —</option>
+                {harbours.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+              </select>
+              <LinkBtn to="/procurement/harbours" show={!!freight.harbourIdFrom} />
+            </div>
           </div>
           <div>
             <label className={labelCls}>Hafen an</label>
-            <select value={freight.harbourIdTo ?? ''} onChange={e => setFreight('harbourIdTo', e.target.value)} className={inputCls}>
-              <option value="">— auswählen —</option>
-              {harbours.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
-            </select>
+            <div className="flex items-end gap-1">
+              <select value={freight.harbourIdTo ?? ''} onChange={e => setFreight('harbourIdTo', e.target.value)} className={inputCls}>
+                <option value="">— auswählen —</option>
+                {harbours.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+              </select>
+              <LinkBtn to="/procurement/harbours" show={!!freight.harbourIdTo} />
+            </div>
           </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

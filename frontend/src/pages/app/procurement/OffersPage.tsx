@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Pencil } from 'lucide-react';
@@ -166,8 +167,16 @@ export default function OffersPage() {
               ) : offers.map(o => (
                 <tr key={o.id} className="hover:bg-dark-800/30">
                   <td className="px-4 py-3 text-white text-sm font-medium">{o.nameShort}</td>
-                  <td className="px-4 py-3 text-dark-300 text-sm">{supplierName(o.supplierId)}</td>
-                  <td className="px-4 py-3 text-dark-300 text-sm">{o.productId ? '✓ verknüpft' : '—'}</td>
+                  <td className="px-4 py-3 text-sm">
+                    {o.supplierId
+                      ? <Link to="/procurement/suppliers" className="text-dark-300 hover:text-primary-400 transition-colors">{supplierName(o.supplierId)}</Link>
+                      : <span className="text-dark-500">—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-sm">
+                    {o.productId
+                      ? <Link to="/procurement/products" className="text-emerald-400 hover:text-emerald-300 transition-colors">✓ Produkt</Link>
+                      : <span className="text-dark-500">—</span>}
+                  </td>
                   <td className="px-4 py-3 text-right text-dark-300 text-sm font-mono">
                     {o.priceUsd.toLocaleString('de-DE', { minimumFractionDigits: 2 })}
                   </td>

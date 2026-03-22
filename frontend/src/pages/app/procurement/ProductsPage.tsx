@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Trash2, Pencil, Tag, X, SlidersHorizontal } from 'lucide-react';
@@ -497,6 +498,7 @@ export default function ProductsPage() {
                 <th className="text-left px-4 py-3 text-dark-400 font-medium">Eigenname</th>
                 <th className="text-left px-4 py-3 text-dark-400 font-medium">Langname</th>
                 <th className="text-left px-4 py-3 text-dark-400 font-medium">EAN</th>
+                <th className="text-left px-4 py-3 text-dark-400 font-medium">Warengruppe</th>
                 <th className="text-left px-4 py-3 text-dark-400 font-medium">Tags</th>
                 <th className="text-right px-4 py-3 text-dark-400 font-medium">EK (EUR)</th>
                 <th className="px-4 py-3"></th>
@@ -504,13 +506,20 @@ export default function ProductsPage() {
             </thead>
             <tbody className="divide-y divide-dark-800/50">
               {products.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-dark-400">Keine Produkte gefunden</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-dark-400">Keine Produkte gefunden</td></tr>
               ) : products.map(p => (
                 <tr key={p.id} className="hover:bg-dark-800/30">
                   <td className="px-4 py-3 text-white font-mono">{p.nameShort}</td>
                   <td className="px-4 py-3 text-dark-300">{p.ownNameShort || '—'}</td>
                   <td className="px-4 py-3 text-dark-400">{p.nameLong || '—'}</td>
                   <td className="px-4 py-3 text-dark-400 font-mono">{p.ean || '—'}</td>
+                  <td className="px-4 py-3 text-sm">
+                    {p.goodsGroupId
+                      ? <Link to="/procurement/goods-groups" className="text-dark-300 hover:text-primary-400 transition-colors">
+                          {goodsGroups.find(g => g.id === p.goodsGroupId)?.name ?? '—'}
+                        </Link>
+                      : <span className="text-dark-500">—</span>}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
                       {(p.tags ?? []).map(t => (

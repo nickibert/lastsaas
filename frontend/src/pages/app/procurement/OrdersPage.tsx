@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { Plus, Search, Trash2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { ordersApi, suppliersApi, type Order, type DeliveryStatus, type PaymentStatus, type ReceiptStatus } from '../../../api/procurement';
@@ -247,7 +247,11 @@ export default function OrdersPage() {
                     <td className="px-4 py-3 text-dark-300 text-sm">
                       {new Date(order.orderDate).toLocaleDateString('de-DE')}
                     </td>
-                    <td className="px-4 py-3 text-dark-300 text-sm">{supplierName(order.supplierId)}</td>
+                    <td className="px-4 py-3 text-sm">
+                      {order.supplierId
+                        ? <Link to="/procurement/suppliers" className="text-dark-300 hover:text-primary-400 transition-colors">{supplierName(order.supplierId)}</Link>
+                        : <span className="text-dark-500">—</span>}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1">
                         {order.deliveryStatus && (
