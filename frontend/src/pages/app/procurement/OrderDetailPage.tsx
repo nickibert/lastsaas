@@ -248,6 +248,13 @@ export default function OrderDetailPage() {
     customsClearanceEur: 0, customsEur: 0, customsPercent: 0, ztn: '',
   });
   const orderFreights: OrderFreight[] = (draft.freights as OrderFreight[]) ?? [];
+  const freightLabel = (f: OrderFreight, idx: number): string => {
+    const typeName = containers.find(c => c.id === f.containerId)?.name;
+    const parts: string[] = [`Container ${idx + 1}`];
+    if (typeName) parts.push(typeName);
+    if (f.containerNr) parts.push(f.containerNr);
+    return parts.join(' · ');
+  };
   const addFreight = () => setDraft(d => ({ ...d, freights: [...(d.freights ?? []), emptyFreight()] }));
   const removeFreight = (idx: number) => setDraft(d => ({ ...d, freights: ((d.freights ?? []) as OrderFreight[]).filter((_, i) => i !== idx) }));
   const setFreightField = (idx: number, key: keyof OrderFreight, value: unknown) =>
@@ -527,9 +534,7 @@ export default function OrderDetailPage() {
                       >
                         <option value="">Alle</option>
                         {orderFreights.map((f, fi) => (
-                          <option key={fi} value={fi}>
-                            {f.containerNr ? f.containerNr : `Container ${fi + 1}`}
-                          </option>
+                          <option key={fi} value={fi}>{freightLabel(f, fi)}</option>
                         ))}
                       </select>
                     </td>
@@ -580,7 +585,7 @@ export default function OrderDetailPage() {
         {orderFreights.map((f, idx) => (
           <div key={idx} className="border border-dark-700 rounded-lg p-4 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium text-dark-300">Container {idx + 1}</h3>
+              <h3 className="text-sm font-medium text-dark-300">{freightLabel(f, idx)}</h3>
               <button onClick={() => removeFreight(idx)}
                 className="p-1 text-dark-500 hover:text-red-400" title="Container entfernen">
                 <X className="w-4 h-4" />
@@ -788,7 +793,7 @@ export default function OrderDetailPage() {
                       <tbody className="divide-y divide-dark-800/50">
                         {calcEK.rows.map((row, i) => {
                           const containerLabel = row.freightIndex !== undefined
-                            ? (orderFreights[row.freightIndex]?.containerNr || `Container ${row.freightIndex + 1}`)
+                            ? freightLabel(orderFreights[row.freightIndex], row.freightIndex)
                             : 'Alle';
                           return (
                             <tr key={i} className="hover:bg-dark-800/20">
