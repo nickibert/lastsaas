@@ -8,7 +8,7 @@
 //   GET /api/v1/products        – article list
 //   GET /api/v1/customers       – customer list
 //   GET /api/v1/suppliers       – supplier list
-//   GET /api/v1/salesOrders    – incoming sales orders
+//   GET /api/v3/purchaseOrders  – purchase orders (Lieferantenbestellungen)
 package xentral
 
 import (
@@ -159,36 +159,52 @@ type XSupplier struct {
 	Origin         string   `json:"origin"`
 }
 
-// XSalesOrder represents an incoming sales order from Xentral.
-// Xentral uses "documentNumber" in v1/salesOrders responses; "orderNumber" is
-// kept as a fallback for older API variants.
-type XSalesOrder struct {
-	ID             string           `json:"id"`
-	OrderNumber    string           `json:"orderNumber"`
-	DocumentNumber string           `json:"documentNumber"`
-	Status         string           `json:"status"`
-	OrderDate      string           `json:"orderDate"`
-	DocumentDate   string           `json:"documentDate"`
-	Customer       XOrderCustomer   `json:"customer"`
-	Positions      []XOrderPosition `json:"positions"`
-	TotalNet       float64          `json:"totalNet"`
-	Currency       string           `json:"currency"`
+// XPurchaseOrder represents a purchase order (Lieferantenbestellung) from Xentral v3.
+type XPurchaseOrder struct {
+	ID             string              `json:"id"`
+	OrderNumber    string              `json:"orderNumber"`
+	DocumentNumber string              `json:"documentNumber"`
+	Status         string              `json:"status"`
+	Date           string              `json:"date"`
+	OrderDate      string              `json:"orderDate"`      // fallback field name
+	Supplier       XPOSupplier         `json:"supplier"`
+	LineItems      []XPOLineItem       `json:"lineItems"`
+	TotalNet       float64             `json:"totalNet"`
+	Currency       string              `json:"currency"`
 }
 
 // ResolvedOrderNumber returns the first non-empty order/document number.
-func (o *XSalesOrder) ResolvedOrderNumber() string {
+func (o *XPurchaseOrder) ResolvedOrderNumber() string {
 	if o.OrderNumber != "" {
 		return o.OrderNumber
 	}
 	return o.DocumentNumber
 }
 
-// ResolvedOrderDate returns the first non-empty order/document date string.
-func (o *XSalesOrder) ResolvedOrderDate() string {
-	if o.OrderDate != "" {
-		return o.OrderDate
+// ResolvedDate returns the first non-empty date string.
+func (o *XPurchaseOrder) ResolvedDate() string {
+	if o.Date != "" {
+		return o.Date
 	}
-	return o.DocumentDate
+	return o.OrderDate
+}
+
+type XPOSupplier struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type XPOLineItem struct {
+	ID          string     `json:"id"`
+	Article     XPOArticle `json:"article"`
+	Description string     `json:"description"`
+	Quantity    float64    `json:"quantity"`
+	UnitPrice   float64    `json:"unitPrice"`
+}
+
+type XPOArticle struct {
+	ID            string `json:"id"`
+	ArticleNumber string `json:"articleNumber"`
 }
 
 type XAddress struct {
@@ -201,13 +217,6 @@ type XAddress struct {
 type XOrderCustomer struct {
 	ID      string `json:"id"`
 	Company string `json:"company"`
-}
-
-type XOrderPosition struct {
-	ProductID   string  `json:"productId"`
-	Description string  `json:"description"`
-	Quantity    float64 `json:"quantity"`
-	UnitPrice   float64 `json:"unitPrice"`
 }
 
 // xentral wraps list responses – the data is always in "data".
@@ -290,11 +299,12 @@ func (c *Client) ListSuppliers(ctx context.Context) ([]XSupplier, error) {
 	return all, nil
 }
 
-// ListSalesOrders fetches all sales orders from Xentral across all pages.
-func (c *Client) ListSalesOrders(ctx context.Context) ([]XSalesOrder, error) {
-	var all []XSalesOrder
+// ListPurchaseOrders fetches all purchase orders (Lieferantenbestellungen) from
+// Xentral across all pages using the v3 API.
+func (c *Client) ListPurchaseOrders(ctx context.Context) ([]XPurchaseOrder, error) {
+	var all []XPurchaseOrder
 	for page := 1; ; page++ {
-		batch, err := listPage[XSalesOrder](c, ctx, "/api/v1/salesOrders", page)
+		batch, err := listPage[XPurchaseOrder](c, ctx, "/api/v3/purchaseOrders", page)
 		if err != nil {
 			return nil, err
 		}

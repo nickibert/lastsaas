@@ -332,7 +332,7 @@ func (e *Engine) upsertSupplier(ctx context.Context, tenantID primitive.ObjectID
 }
 
 // -------------------------------------------------------------------
-// Orders (Xentral sales-orders → LastSaaS orders, inbound)
+// Orders (Xentral purchaseOrders v3 → LastSaaS orders)
 // -------------------------------------------------------------------
 
 func (e *Engine) SyncOrders(ctx context.Context, tenantID primitive.ObjectID, client *Client) models.XentralSyncLog {
@@ -345,7 +345,7 @@ func (e *Engine) SyncOrders(ctx context.Context, tenantID primitive.ObjectID, cl
 	}
 	e.db.XentralSyncLogs().InsertOne(ctx, log) //nolint
 
-	orders, err := client.ListSalesOrders(ctx)
+	orders, err := client.ListPurchaseOrders(ctx)
 	if err != nil {
 		return e.failLog(ctx, log, err.Error())
 	}
@@ -362,7 +362,41 @@ func (e *Engine) SyncOrders(ctx context.Context, tenantID primitive.ObjectID, cl
 	return e.finishLog(ctx, log)
 }
 
-func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, xo XSalesOrder) error {
+// resolveSupplierID looks up the local SupplierID for a Xentral supplier ID via the mappings table.
+func (e *Engine) resolveSupplierID(ctx context.Context, tenantID primitive.ObjectID, xentralSupplierID string) *primitive.ObjectID {
+	if xentralSupplierID == "" {
+		return nil
+	}
+	var m models.XentralMapping
+	err := e.db.XentralMappings().FindOne(ctx, bson.M{
+		"tenantId":  tenantID,
+		"entity":    "supplier",
+		"xentralId": xentralSupplierID,
+	}).Decode(&m)
+	if err != nil {
+		return nil
+	}
+	return &m.LocalID
+}
+
+// resolveProductID looks up the local ProductID for a Xentral article ID via the mappings table.
+func (e *Engine) resolveProductID(ctx context.Context, tenantID primitive.ObjectID, xentralArticleID string) *primitive.ObjectID {
+	if xentralArticleID == "" {
+		return nil
+	}
+	var m models.XentralMapping
+	err := e.db.XentralMappings().FindOne(ctx, bson.M{
+		"tenantId":  tenantID,
+		"entity":    "product",
+		"xentralId": xentralArticleID,
+	}).Decode(&m)
+	if err != nil {
+		return nil
+	}
+	return &m.LocalID
+}
+
+func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, xo XPurchaseOrder) error {
 	if xo.ID == "" {
 		return nil
 	}
@@ -376,29 +410,47 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 
 	now := time.Now()
 
-	// Resolve order date (try orderDate, fall back to documentDate)
+	// Resolve order date
 	orderDate := now
-	if d := xo.ResolvedOrderDate(); d != "" {
+	if d := xo.ResolvedDate(); d != "" {
 		if t, parseErr := time.Parse("2006-01-02", d); parseErr == nil {
 			orderDate = t
 		}
 	}
 
-	// Build order products from positions
+	// Resolve supplier via mapping (requires suppliers sync to have run first)
+	supplierID := e.resolveSupplierID(ctx, tenantID, xo.Supplier.ID)
+
+	// Build order products from line items; resolve local product IDs where possible
 	var orderProducts []models.OrderProduct
-	for _, pos := range xo.Positions {
-		orderProducts = append(orderProducts, models.OrderProduct{
-			Quantity:      int(pos.Quantity),
-			UnitPriceUSD:  pos.UnitPrice,
-			TotalPriceUSD: pos.UnitPrice * pos.Quantity,
-		})
+	for _, item := range xo.LineItems {
+		qty := int(item.Quantity)
+		if qty < 1 {
+			qty = 1
+		}
+		op := models.OrderProduct{
+			Quantity:      qty,
+			UnitPriceUSD:  item.UnitPrice,
+			TotalPriceUSD: item.UnitPrice * item.Quantity,
+		}
+		if pid := e.resolveProductID(ctx, tenantID, item.Article.ID); pid != nil {
+			op.ProductID = *pid
+		}
+		// Only include line items where we could resolve the product,
+		// to satisfy the required ProductID field on OrderProduct.
+		if op.ProductID != (primitive.ObjectID{}) {
+			orderProducts = append(orderProducts, op)
+		}
 	}
+
+	orderNumber := xo.ResolvedOrderNumber()
 
 	if err == mongo.ErrNoDocuments {
 		order := models.Order{
 			ID:          primitive.NewObjectID(),
 			TenantID:    tenantID,
-			OrderNumber: xo.ResolvedOrderNumber(),
+			SupplierID:  supplierID,
+			OrderNumber: orderNumber,
 			OrderDate:   orderDate,
 			OrderSumUSD: xo.TotalNet,
 			Products:    orderProducts,
@@ -414,7 +466,7 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 			Entity:    "order",
 			LocalID:   order.ID,
 			XentralID: xo.ID,
-			XentralNr: xo.ResolvedOrderNumber(),
+			XentralNr: orderNumber,
 			CreatedAt: now,
 			UpdatedAt: now,
 		})
@@ -424,13 +476,19 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 		return fmt.Errorf("lookup mapping: %w", err)
 	}
 
+	setFields := bson.M{
+		"orderSumUsd": xo.TotalNet,
+		"updatedAt":   now,
+	}
+	if supplierID != nil {
+		setFields["supplierId"] = supplierID
+	}
+	if len(orderProducts) > 0 {
+		setFields["products"] = orderProducts
+	}
 	_, _ = e.db.Orders().UpdateOne(ctx,
 		bson.M{"_id": mapping.LocalID, "tenantId": tenantID},
-		bson.M{"$set": bson.M{
-			"orderSumUsd": xo.TotalNet,
-			"products":    orderProducts,
-			"updatedAt":   now,
-		}},
+		bson.M{"$set": setFields},
 	)
 	return nil
 }
