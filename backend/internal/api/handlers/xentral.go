@@ -107,6 +107,8 @@ func (h *XentralHandler) saveConfig(w http.ResponseWriter, r *http.Request) {
 		SyncSuppliers         bool   `json:"syncSuppliers"`
 		SyncOrders            bool   `json:"syncOrders"`
 		SyncSalesOrders       bool   `json:"syncSalesOrders"`
+		SyncPurchasePrices    bool   `json:"syncPurchasePrices"`
+		SyncSalesPrices       bool   `json:"syncSalesPrices"`
 		PushProductsToXentral bool   `json:"pushProductsToXentral"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -124,6 +126,8 @@ func (h *XentralHandler) saveConfig(w http.ResponseWriter, r *http.Request) {
 		"syncSuppliers":         req.SyncSuppliers,
 		"syncOrders":            req.SyncOrders,
 		"syncSalesOrders":       req.SyncSalesOrders,
+		"syncPurchasePrices":    req.SyncPurchasePrices,
+		"syncSalesPrices":       req.SyncSalesPrices,
 		"pushProductsToXentral": req.PushProductsToXentral,
 		"updatedAt":             now,
 	}
@@ -474,6 +478,18 @@ func (h *XentralHandler) runSync(r *http.Request, tenantID primitive.ObjectID, e
 		}
 		log = h.engine.SyncSalesOrders(r.Context(), tenantID, client)
 		h.db.XentralConfigs().UpdateOne(r.Context(), bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncSalesOrders": now}}) //nolint
+	case "purchase_prices":
+		if !cfg.SyncPurchasePrices {
+			return skippedLog(tenantID, entity)
+		}
+		log = h.engine.SyncPurchasePrices(r.Context(), tenantID, client)
+		h.db.XentralConfigs().UpdateOne(r.Context(), bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncPurchasePrices": now}}) //nolint
+	case "sales_prices":
+		if !cfg.SyncSalesPrices {
+			return skippedLog(tenantID, entity)
+		}
+		log = h.engine.SyncSalesPrices(r.Context(), tenantID, client)
+		h.db.XentralConfigs().UpdateOne(r.Context(), bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncSalesPrices": now}}) //nolint
 	default:
 		return skippedLog(tenantID, entity)
 	}
@@ -544,6 +560,10 @@ func (h *XentralHandler) receiveWebhook(w http.ResponseWriter, r *http.Request) 
 			h.engine.SyncOrders(r.Context(), cfg.TenantID, client) //nolint
 		case isEventType(payload.Event, "salesOrder"):
 			h.engine.SyncSalesOrders(r.Context(), cfg.TenantID, client) //nolint
+		case isEventType(payload.Event, "purchasePrice"):
+			h.engine.SyncPurchasePrices(r.Context(), cfg.TenantID, client) //nolint
+		case isEventType(payload.Event, "salesPrice"):
+			h.engine.SyncSalesPrices(r.Context(), cfg.TenantID, client) //nolint
 		}
 	}()
 

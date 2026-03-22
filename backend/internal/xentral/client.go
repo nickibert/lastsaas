@@ -406,6 +406,91 @@ func (c *Client) get(ctx context.Context, path string, params url.Values) ([]byt
 	return body, nil
 }
 
+// ListPurchasePrices fetches all purchase price entries (EK-Preislisten) from Xentral.
+// Endpoint: GET /api/v1/purchasePrices
+func (c *Client) ListPurchasePrices(ctx context.Context) ([]XPurchasePrice, error) {
+	var all []XPurchasePrice
+	for page := 1; ; page++ {
+		batch, err := listPage[XPurchasePrice](c, ctx, "/api/v1/purchasePrices", page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < pageSize {
+			break
+		}
+	}
+	return all, nil
+}
+
+// ListSalesPrices fetches all sales price entries (VK-Preislisten) from Xentral.
+// Endpoint: GET /api/v3/salesPrices
+// Requires feature flag "api-v3-sales-prices" on the Xentral instance.
+func (c *Client) ListSalesPrices(ctx context.Context) ([]XSalesPrice, error) {
+	var all []XSalesPrice
+	for page := 1; ; page++ {
+		batch, err := listPage[XSalesPrice](c, ctx, "/api/v3/salesPrices", page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < pageSize {
+			break
+		}
+	}
+	return all, nil
+}
+
+// -------------------------------------------------------------------
+// Purchase/Sales price types
+// -------------------------------------------------------------------
+
+// XPurchasePrice is a purchase price entry from Xentral GET /api/v1/purchasePrices.
+type XPurchasePrice struct {
+	ID           string         `json:"id"`
+	Product      XPriceProduct  `json:"product"`
+	Supplier     XPriceSupplier `json:"supplier"`
+	Price        float64        `json:"price"`
+	Currency     string         `json:"currency"`
+	FromQuantity float64        `json:"fromQuantity"`
+	ValidFrom    string         `json:"validFrom"`
+	ExpiresAt    string         `json:"expiresAt"`
+	Name         string         `json:"name"` // price list name if provided
+}
+
+// XSalesPrice is a sales price entry from Xentral GET /api/v3/salesPrices.
+type XSalesPrice struct {
+	ID             string        `json:"id"`
+	Article        XPriceProduct `json:"article"`
+	Name           string        `json:"name"`           // price group / list name
+	Price          float64       `json:"price"`
+	Currency       string        `json:"currency"`
+	FromQuantity   float64       `json:"fromQuantity"`
+	ValidFrom      string        `json:"validFrom"`
+	ValidTo        string        `json:"validTo"`
+	// Some Xentral versions nest the price differently:
+	PriceAmount    json.Number   `json:"amount"`         // fallback field
+}
+
+// ResolvedPrice returns the price, checking the nested amount field as a fallback.
+func (p *XSalesPrice) ResolvedPrice() float64 {
+	if p.Price != 0 {
+		return p.Price
+	}
+	f, _ := p.PriceAmount.Float64()
+	return f
+}
+
+type XPriceProduct struct {
+	ID            string `json:"id"`
+	ArticleNumber string `json:"articleNumber"`
+}
+
+type XPriceSupplier struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 func (c *Client) patch(ctx context.Context, path string, payload interface{}) error {
 	c.mu.Lock()
 	if wait := c.minInterval - time.Since(c.lastReqAt); wait > 0 {

@@ -135,24 +135,39 @@ type Product struct {
 	UpdatedAt time.Time `json:"updatedAt" bson:"updatedAt"`
 }
 
+// ProductPriceList holds a single price entry for a product.
+//
+// Type:
+//   - "EK" – purchase price (Einkaufspreis). SPoT hierarchy:
+//     Source "order"  → calculated from our actual purchase orders incl. freight (highest trust, never overwritten)
+//     Source "import" → synced from Xentral purchasePrices API
+//     Source "manual" → user-entered
+//   - "VK" – sales price (Verkaufspreis). Typically synced from Xentral salesPrices API.
+//
+// Quantity break: a price row applies for orders of at least Quantity units (0 = no minimum).
 type ProductPriceList struct {
-	ID           primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
-	TenantID     primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
-	ProductID    primitive.ObjectID  `json:"productId" bson:"productId" validate:"required"`
-	Type         string              `json:"type" bson:"type" validate:"required,oneof=EK VK"`
-	Name         string              `json:"name" bson:"name" validate:"required,min=1,max=100"`
-	Price        float64             `json:"price" bson:"price" validate:"min=0"`
-	Currency     string              `json:"currency" bson:"currency" validate:"required,len=3"`
-	ValidFrom    *time.Time          `json:"validFrom,omitempty" bson:"validFrom,omitempty"`
-	ValidTo      *time.Time          `json:"validTo,omitempty" bson:"validTo,omitempty"`
-	Notes        string              `json:"notes,omitempty" bson:"notes,omitempty" validate:"omitempty,max=500"`
-	// Provenance: set when created by applyOrderEK
-	OrderID      *primitive.ObjectID `json:"orderId,omitempty" bson:"orderId,omitempty"`
-	FreightIndex *int                `json:"freightIndex,omitempty" bson:"freightIndex,omitempty"`
-	Quantity     int                 `json:"quantity,omitempty" bson:"quantity,omitempty"`
-	Source       string              `json:"source,omitempty" bson:"source,omitempty"` // "order" | "import" | "manual"
-	CreatedAt    time.Time           `json:"createdAt" bson:"createdAt"`
-	UpdatedAt    time.Time           `json:"updatedAt" bson:"updatedAt"`
+	ID             primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
+	TenantID       primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
+	ProductID      primitive.ObjectID  `json:"productId" bson:"productId" validate:"required"`
+	Type           string              `json:"type" bson:"type" validate:"required,oneof=EK VK"`
+	Name           string              `json:"name" bson:"name" validate:"required,min=1,max=100"`
+	Price          float64             `json:"price" bson:"price" validate:"min=0"`
+	Currency       string              `json:"currency" bson:"currency" validate:"required,len=3"`
+	// SupplierID links an EK price to a specific supplier (optional).
+	SupplierID     *primitive.ObjectID `json:"supplierId,omitempty" bson:"supplierId,omitempty"`
+	// PriceGroupName is the Xentral price group / customer group for VK prices (optional).
+	PriceGroupName string              `json:"priceGroupName,omitempty" bson:"priceGroupName,omitempty" validate:"omitempty,max=100"`
+	// Quantity break: minimum order quantity for this price to apply (0 = no minimum).
+	Quantity       int                 `json:"quantity,omitempty" bson:"quantity,omitempty" validate:"min=0"`
+	ValidFrom      *time.Time          `json:"validFrom,omitempty" bson:"validFrom,omitempty"`
+	ValidTo        *time.Time          `json:"validTo,omitempty" bson:"validTo,omitempty"`
+	Notes          string              `json:"notes,omitempty" bson:"notes,omitempty" validate:"omitempty,max=500"`
+	// Provenance
+	Source         string              `json:"source,omitempty" bson:"source,omitempty"` // "order" | "import" | "manual"
+	OrderID        *primitive.ObjectID `json:"orderId,omitempty" bson:"orderId,omitempty"`
+	FreightIndex   *int                `json:"freightIndex,omitempty" bson:"freightIndex,omitempty"`
+	CreatedAt      time.Time           `json:"createdAt" bson:"createdAt"`
+	UpdatedAt      time.Time           `json:"updatedAt" bson:"updatedAt"`
 }
 
 // ---------------------------------------------------------------------------

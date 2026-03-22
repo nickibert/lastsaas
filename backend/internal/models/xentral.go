@@ -44,21 +44,25 @@ type XentralConfig struct {
 	SyncIntervalH int `json:"syncIntervalH" bson:"syncIntervalH"`
 
 	// Entity toggles (inbound: Xentral → LastSaaS)
-	SyncProducts     bool `json:"syncProducts" bson:"syncProducts"`
-	SyncCustomers    bool `json:"syncCustomers" bson:"syncCustomers"`
-	SyncSuppliers    bool `json:"syncSuppliers" bson:"syncSuppliers"`
-	SyncOrders       bool `json:"syncOrders" bson:"syncOrders"`       // purchase orders
-	SyncSalesOrders  bool `json:"syncSalesOrders" bson:"syncSalesOrders"` // sales orders (for reorder planning)
+	SyncProducts        bool `json:"syncProducts" bson:"syncProducts"`
+	SyncCustomers       bool `json:"syncCustomers" bson:"syncCustomers"`
+	SyncSuppliers       bool `json:"syncSuppliers" bson:"syncSuppliers"`
+	SyncOrders          bool `json:"syncOrders" bson:"syncOrders"`                 // purchase orders
+	SyncSalesOrders     bool `json:"syncSalesOrders" bson:"syncSalesOrders"`       // sales orders (reorder planning)
+	SyncPurchasePrices  bool `json:"syncPurchasePrices" bson:"syncPurchasePrices"` // EK price lists from Xentral
+	SyncSalesPrices     bool `json:"syncSalesPrices" bson:"syncSalesPrices"`       // VK price lists from Xentral
 
 	// Outbound toggle (LastSaaS → Xentral): push EAN + freefields back to Xentral
 	PushProductsToXentral bool `json:"pushProductsToXentral" bson:"pushProductsToXentral"`
 
 	// Last successful sync timestamps per entity
-	LastSyncProducts    *time.Time `json:"lastSyncProducts,omitempty" bson:"lastSyncProducts,omitempty"`
-	LastSyncCustomers   *time.Time `json:"lastSyncCustomers,omitempty" bson:"lastSyncCustomers,omitempty"`
-	LastSyncSuppliers   *time.Time `json:"lastSyncSuppliers,omitempty" bson:"lastSyncSuppliers,omitempty"`
-	LastSyncOrders      *time.Time `json:"lastSyncOrders,omitempty" bson:"lastSyncOrders,omitempty"`
-	LastSyncSalesOrders *time.Time `json:"lastSyncSalesOrders,omitempty" bson:"lastSyncSalesOrders,omitempty"`
+	LastSyncProducts       *time.Time `json:"lastSyncProducts,omitempty" bson:"lastSyncProducts,omitempty"`
+	LastSyncCustomers      *time.Time `json:"lastSyncCustomers,omitempty" bson:"lastSyncCustomers,omitempty"`
+	LastSyncSuppliers      *time.Time `json:"lastSyncSuppliers,omitempty" bson:"lastSyncSuppliers,omitempty"`
+	LastSyncOrders         *time.Time `json:"lastSyncOrders,omitempty" bson:"lastSyncOrders,omitempty"`
+	LastSyncSalesOrders    *time.Time `json:"lastSyncSalesOrders,omitempty" bson:"lastSyncSalesOrders,omitempty"`
+	LastSyncPurchasePrices *time.Time `json:"lastSyncPurchasePrices,omitempty" bson:"lastSyncPurchasePrices,omitempty"`
+	LastSyncSalesPrices    *time.Time `json:"lastSyncSalesPrices,omitempty" bson:"lastSyncSalesPrices,omitempty"`
 
 	// WebhookToken is a random token embedded in the Xentral webhook URL so that
 	// only Xentral can trigger real-time sync updates.

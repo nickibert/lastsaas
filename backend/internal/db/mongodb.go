@@ -311,6 +311,14 @@ func (m *MongoDB) ensureIndexes() {
 			},
 		},
 		{
+			"product_price_lists",
+			[]mongo.IndexModel{
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "productId", Value: 1}, {Key: "type", Value: 1}}},
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "productId", Value: 1}, {Key: "supplierId", Value: 1}}, Options: options.Index().SetSparse(true)},
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "type", Value: 1}, {Key: "source", Value: 1}}},
+			},
+		},
+		{
 			"stock_movements",
 			[]mongo.IndexModel{
 				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "productId", Value: 1}, {Key: "movedAt", Value: -1}}},

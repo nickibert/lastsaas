@@ -647,6 +647,277 @@ func (e *Engine) upsertSalesOrder(ctx context.Context, tenantID primitive.Object
 	return nil
 }
 
+// -------------------------------------------------------------------
+// Purchase Prices (Xentral /api/v1/purchasePrices → ProductPriceList Type=EK)
+//
+// SPoT rule: entries with Source="order" are never overwritten — those are
+// derived from our own purchase order EK calculation (incl. freight).
+// Xentral prices land as Source="import" and can be updated freely.
+// -------------------------------------------------------------------
+
+func (e *Engine) SyncPurchasePrices(ctx context.Context, tenantID primitive.ObjectID, client *Client) models.XentralSyncLog {
+	log := models.XentralSyncLog{
+		ID:        primitive.NewObjectID(),
+		TenantID:  tenantID,
+		Entity:    "purchase_prices",
+		Status:    "running",
+		StartedAt: time.Now(),
+	}
+	e.db.XentralSyncLogs().InsertOne(ctx, log) //nolint
+
+	prices, err := client.ListPurchasePrices(ctx)
+	if err != nil {
+		return e.failLog(ctx, log, err.Error())
+	}
+
+	for _, p := range prices {
+		if err := e.upsertPurchasePrice(ctx, tenantID, p); err != nil {
+			log.Errors = append(log.Errors, fmt.Sprintf("%s: %v", p.ID, err))
+			log.Skipped++
+		} else {
+			log.Updated++
+		}
+	}
+	return e.finishLog(ctx, log)
+}
+
+func (e *Engine) upsertPurchasePrice(ctx context.Context, tenantID primitive.ObjectID, xp XPurchasePrice) error {
+	if xp.ID == "" || xp.Product.ID == "" {
+		return nil
+	}
+
+	productID := e.resolveProductID(ctx, tenantID, xp.Product.ID)
+	if productID == nil {
+		return nil // product not synced yet; skip silently
+	}
+
+	supplierID := e.resolveSupplierID(ctx, tenantID, xp.Supplier.ID)
+
+	currency := xp.Currency
+	if currency == "" {
+		currency = "EUR"
+	}
+	name := xp.Name
+	if name == "" {
+		name = "Xentral EK"
+	}
+	qty := int(xp.FromQuantity)
+	if qty < 0 {
+		qty = 0
+	}
+
+	now := time.Now()
+	validFrom := parseDate(xp.ValidFrom)
+	validTo := parseDate(xp.ExpiresAt)
+
+	var mapping models.XentralMapping
+	err := e.db.XentralMappings().FindOne(ctx, bson.M{
+		"tenantId":  tenantID,
+		"entity":    "purchase_price",
+		"xentralId": xp.ID,
+	}).Decode(&mapping)
+
+	if err == mongo.ErrNoDocuments {
+		entry := models.ProductPriceList{
+			ID:         primitive.NewObjectID(),
+			TenantID:   tenantID,
+			ProductID:  *productID,
+			SupplierID: supplierID,
+			Type:       "EK",
+			Name:       name,
+			Price:      xp.Price,
+			Currency:   currency,
+			Quantity:   qty,
+			ValidFrom:  validFrom,
+			ValidTo:    validTo,
+			Source:     "import",
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		if _, insertErr := e.db.ProductPriceLists().InsertOne(ctx, entry); insertErr != nil {
+			return fmt.Errorf("insert purchase price: %w", insertErr)
+		}
+		_, _ = e.db.XentralMappings().InsertOne(ctx, models.XentralMapping{
+			ID:        primitive.NewObjectID(),
+			TenantID:  tenantID,
+			Entity:    "purchase_price",
+			LocalID:   entry.ID,
+			XentralID: xp.ID,
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("lookup mapping: %w", err)
+	}
+
+	// Never overwrite entries with Source="order" – those are from our own EK calculation.
+	var existing models.ProductPriceList
+	if findErr := e.db.ProductPriceLists().FindOne(ctx, bson.M{"_id": mapping.LocalID}).Decode(&existing); findErr == nil {
+		if existing.Source == "order" {
+			return nil
+		}
+	}
+
+	setFields := bson.M{
+		"price":     xp.Price,
+		"currency":  currency,
+		"name":      name,
+		"quantity":  qty,
+		"updatedAt": now,
+	}
+	if validFrom != nil {
+		setFields["validFrom"] = validFrom
+	}
+	if validTo != nil {
+		setFields["validTo"] = validTo
+	}
+	if supplierID != nil {
+		setFields["supplierId"] = supplierID
+	}
+	_, _ = e.db.ProductPriceLists().UpdateOne(ctx,
+		bson.M{"_id": mapping.LocalID, "tenantId": tenantID},
+		bson.M{"$set": setFields},
+	)
+	return nil
+}
+
+// -------------------------------------------------------------------
+// Sales Prices (Xentral /api/v3/salesPrices → ProductPriceList Type=VK)
+// -------------------------------------------------------------------
+
+func (e *Engine) SyncSalesPrices(ctx context.Context, tenantID primitive.ObjectID, client *Client) models.XentralSyncLog {
+	log := models.XentralSyncLog{
+		ID:        primitive.NewObjectID(),
+		TenantID:  tenantID,
+		Entity:    "sales_prices",
+		Status:    "running",
+		StartedAt: time.Now(),
+	}
+	e.db.XentralSyncLogs().InsertOne(ctx, log) //nolint
+
+	prices, err := client.ListSalesPrices(ctx)
+	if err != nil {
+		return e.failLog(ctx, log, err.Error())
+	}
+
+	for _, p := range prices {
+		if err := e.upsertSalesPrice(ctx, tenantID, p); err != nil {
+			log.Errors = append(log.Errors, fmt.Sprintf("%s: %v", p.ID, err))
+			log.Skipped++
+		} else {
+			log.Updated++
+		}
+	}
+	return e.finishLog(ctx, log)
+}
+
+func (e *Engine) upsertSalesPrice(ctx context.Context, tenantID primitive.ObjectID, xp XSalesPrice) error {
+	if xp.ID == "" || xp.Article.ID == "" {
+		return nil
+	}
+
+	productID := e.resolveProductID(ctx, tenantID, xp.Article.ID)
+	if productID == nil {
+		return nil
+	}
+
+	price := xp.ResolvedPrice()
+	currency := xp.Currency
+	if currency == "" {
+		currency = "EUR"
+	}
+	name := xp.Name
+	if name == "" {
+		name = "Xentral VK"
+	}
+	qty := int(xp.FromQuantity)
+	if qty < 0 {
+		qty = 0
+	}
+
+	now := time.Now()
+	validFrom := parseDate(xp.ValidFrom)
+	validTo := parseDate(xp.ValidTo)
+
+	var mapping models.XentralMapping
+	err := e.db.XentralMappings().FindOne(ctx, bson.M{
+		"tenantId":  tenantID,
+		"entity":    "sales_price",
+		"xentralId": xp.ID,
+	}).Decode(&mapping)
+
+	if err == mongo.ErrNoDocuments {
+		entry := models.ProductPriceList{
+			ID:             primitive.NewObjectID(),
+			TenantID:       tenantID,
+			ProductID:      *productID,
+			Type:           "VK",
+			Name:           name,
+			PriceGroupName: xp.Name,
+			Price:          price,
+			Currency:       currency,
+			Quantity:       qty,
+			ValidFrom:      validFrom,
+			ValidTo:        validTo,
+			Source:         "import",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		}
+		if _, insertErr := e.db.ProductPriceLists().InsertOne(ctx, entry); insertErr != nil {
+			return fmt.Errorf("insert sales price: %w", insertErr)
+		}
+		_, _ = e.db.XentralMappings().InsertOne(ctx, models.XentralMapping{
+			ID:        primitive.NewObjectID(),
+			TenantID:  tenantID,
+			Entity:    "sales_price",
+			LocalID:   entry.ID,
+			XentralID: xp.ID,
+			XentralNr: xp.Name,
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("lookup mapping: %w", err)
+	}
+
+	setFields := bson.M{
+		"price":          price,
+		"currency":       currency,
+		"name":           name,
+		"priceGroupName": xp.Name,
+		"quantity":       qty,
+		"updatedAt":      now,
+	}
+	if validFrom != nil {
+		setFields["validFrom"] = validFrom
+	}
+	if validTo != nil {
+		setFields["validTo"] = validTo
+	}
+	_, _ = e.db.ProductPriceLists().UpdateOne(ctx,
+		bson.M{"_id": mapping.LocalID, "tenantId": tenantID},
+		bson.M{"$set": setFields},
+	)
+	return nil
+}
+
+// parseDate parses an ISO date string "2006-01-02" into a *time.Time.
+// Returns nil if the string is empty or unparseable.
+func parseDate(s string) *time.Time {
+	if s == "" {
+		return nil
+	}
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return nil
+	}
+	return &t
+}
+
 // resolveCustomerID looks up the local CustomerID for a Xentral customer ID.
 func (e *Engine) resolveCustomerID(ctx context.Context, tenantID primitive.ObjectID, xentralCustomerID string) *primitive.ObjectID {
 	if xentralCustomerID == "" {
@@ -693,8 +964,10 @@ func runScheduledSyncs(ctx context.Context, database *db.MongoDB) {
 	}, options.Find().SetProjection(bson.M{
 		"tenantId": 1, "baseUrl": 1, "apiToken": 1,
 		"syncIntervalH": 1,
-		"syncProducts": 1, "syncCustomers": 1, "syncSuppliers": 1, "syncOrders": 1, "syncSalesOrders": 1,
-		"lastSyncProducts": 1, "lastSyncCustomers": 1, "lastSyncSuppliers": 1, "lastSyncOrders": 1, "lastSyncSalesOrders": 1,
+		"syncProducts": 1, "syncCustomers": 1, "syncSuppliers": 1, "syncOrders": 1,
+		"syncSalesOrders": 1, "syncPurchasePrices": 1, "syncSalesPrices": 1,
+		"lastSyncProducts": 1, "lastSyncCustomers": 1, "lastSyncSuppliers": 1, "lastSyncOrders": 1,
+		"lastSyncSalesOrders": 1, "lastSyncPurchasePrices": 1, "lastSyncSalesPrices": 1,
 	}))
 	if err != nil {
 		return
@@ -747,6 +1020,22 @@ func runScheduledSyncs(ctx context.Context, database *db.MongoDB) {
 			database.XentralConfigs().UpdateOne(ctx, //nolint
 				bson.M{"tenantId": cfg.TenantID},
 				bson.M{"$set": bson.M{"lastSyncSalesOrders": t}},
+			)
+		}
+		if cfg.SyncPurchasePrices && isDue(cfg.LastSyncPurchasePrices, now, interval) {
+			engine.SyncPurchasePrices(ctx, cfg.TenantID, client) //nolint
+			t := now
+			database.XentralConfigs().UpdateOne(ctx, //nolint
+				bson.M{"tenantId": cfg.TenantID},
+				bson.M{"$set": bson.M{"lastSyncPurchasePrices": t}},
+			)
+		}
+		if cfg.SyncSalesPrices && isDue(cfg.LastSyncSalesPrices, now, interval) {
+			engine.SyncSalesPrices(ctx, cfg.TenantID, client) //nolint
+			t := now
+			database.XentralConfigs().UpdateOne(ctx, //nolint
+				bson.M{"tenantId": cfg.TenantID},
+				bson.M{"$set": bson.M{"lastSyncSalesPrices": t}},
 			)
 		}
 	}
