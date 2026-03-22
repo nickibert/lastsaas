@@ -8,8 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"lastsaas/internal/auth"
 	"lastsaas/internal/db"
 	"lastsaas/internal/models"
+	"lastsaas/internal/validation"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -23,6 +25,8 @@ func cmdUsers() {
 Subcommands:
   list                          List all users
   get --email <email>           Show user details
+  create --email <email> --name <name> [--role owner|admin|user] [--tenant <id>]
+                                Create a new user with password
   suspend --email <email>       Suspend a user account
   activate --email <email>      Reactivate a suspended account
   revoke-sessions --email <email>  Revoke all sessions for a user`)
@@ -34,6 +38,8 @@ Subcommands:
 		cmdUsersList()
 	case "get":
 		cmdUsersGet()
+	case "create":
+		cmdUsersCreate()
 	case "suspend":
 		cmdUsersSetActive(false)
 	case "activate":
@@ -144,6 +150,129 @@ func cmdUsersList() {
 		)
 	}
 	fmt.Printf("\n%d users shown\n", len(users))
+}
+
+func cmdUsersCreate() {
+	fs := flag.NewFlagSet("users create", flag.ExitOnError)
+	email := fs.String("email", "", "Email address (required)")
+	name := fs.String("name", "", "Display name (required)")
+	role := fs.String("role", "admin", "Role: owner, admin, or user (default: admin)")
+	tenantID := fs.String("tenant", "", "Tenant ID to add membership (default: root tenant)")
+	fs.Parse(os.Args[3:])
+
+	if *email == "" || *name == "" {
+		fmt.Fprintln(os.Stderr, "Usage: lastsaas users create --email <email> --name <name> [--role owner|admin|user] [--tenant <id>]")
+		os.Exit(1)
+	}
+
+	memberRole := models.MemberRole(*role)
+	if !models.ValidRole(memberRole) {
+		fmt.Fprintf(os.Stderr, "Invalid role %q — must be owner, admin, or user\n", *role)
+		os.Exit(1)
+	}
+
+	database, _, cleanup := connectDB()
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	emailNorm := strings.TrimSpace(strings.ToLower(*email))
+
+	// Check for duplicate
+	var existing models.User
+	if err := database.Users().FindOne(ctx, bson.M{"email": emailNorm}).Decode(&existing); err == nil {
+		fmt.Fprintf(os.Stderr, "User already exists: %s\n", emailNorm)
+		os.Exit(1)
+	}
+
+	// Resolve tenant
+	var tenant models.Tenant
+	if *tenantID != "" {
+		tid, err := primitive.ObjectIDFromHex(*tenantID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid tenant ID: %s\n", *tenantID)
+			os.Exit(1)
+		}
+		if err := database.Tenants().FindOne(ctx, bson.M{"_id": tid}).Decode(&tenant); err != nil {
+			fmt.Fprintf(os.Stderr, "Tenant not found: %s\n", *tenantID)
+			os.Exit(1)
+		}
+	} else {
+		if err := database.Tenants().FindOne(ctx, bson.M{"isRoot": true}).Decode(&tenant); err != nil {
+			fmt.Fprintln(os.Stderr, "Root tenant not found — run 'lastsaas setup' first")
+			os.Exit(1)
+		}
+	}
+
+	passwordService := auth.NewPasswordService()
+	password := promptPassword("Password")
+	confirm := promptPassword("Confirm password")
+
+	if password != confirm {
+		fmt.Fprintln(os.Stderr, "Passwords do not match.")
+		os.Exit(1)
+	}
+
+	if err := passwordService.ValidatePasswordStrength(password); err != nil {
+		fmt.Fprintf(os.Stderr, "Password too weak: %v\n", err)
+		fmt.Fprintln(os.Stderr, "Requirements: 10+ characters, uppercase, lowercase, number, special character")
+		os.Exit(1)
+	}
+
+	passwordHash, err := passwordService.HashPassword(password)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to hash password: %v\n", err)
+		os.Exit(1)
+	}
+
+	now := time.Now()
+
+	user := models.User{
+		ID:            primitive.NewObjectID(),
+		Email:         emailNorm,
+		DisplayName:   strings.TrimSpace(*name),
+		PasswordHash:  passwordHash,
+		AuthMethods:   []models.AuthMethod{models.AuthMethodPassword},
+		EmailVerified: true,
+		IsActive:      true,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := validation.Validate(&user); err != nil {
+		fmt.Fprintf(os.Stderr, "Validation failed: %v\n", err)
+		os.Exit(1)
+	}
+	if _, err := database.Users().InsertOne(ctx, user); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create user: %v\n", err)
+		os.Exit(1)
+	}
+
+	membership := models.TenantMembership{
+		ID:        primitive.NewObjectID(),
+		UserID:    user.ID,
+		TenantID:  tenant.ID,
+		Role:      memberRole,
+		JoinedAt:  now,
+		UpdatedAt: now,
+	}
+	if err := validation.Validate(&membership); err != nil {
+		database.Users().DeleteOne(ctx, bson.M{"_id": user.ID})
+		fmt.Fprintf(os.Stderr, "Membership validation failed: %v\n", err)
+		os.Exit(1)
+	}
+	if _, err := database.TenantMemberships().InsertOne(ctx, membership); err != nil {
+		database.Users().DeleteOne(ctx, bson.M{"_id": user.ID})
+		fmt.Fprintf(os.Stderr, "Failed to create membership: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("User created successfully.\n")
+	fmt.Printf("  ID:     %s\n", user.ID.Hex())
+	fmt.Printf("  Email:  %s\n", user.Email)
+	fmt.Printf("  Name:   %s\n", user.DisplayName)
+	fmt.Printf("  Role:   %s\n", memberRole)
+	fmt.Printf("  Tenant: %s (%s)\n", tenant.Name, tenant.ID.Hex())
 }
 
 func cmdUsersGet() {
