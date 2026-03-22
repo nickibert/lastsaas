@@ -52,9 +52,68 @@ func (c *Client) Ping(ctx context.Context) error {
 	return err
 }
 
+// GetSettings calls the undocumented /api/settings endpoint and returns
+// the Xentral instance information (company name, version, address, …).
+// The response schema is not officially documented so we capture common
+// fields and store the raw JSON for forward-compatibility.
+func (c *Client) GetSettings(ctx context.Context) (*XentralSettings, error) {
+	body, err := c.get(ctx, "/api/settings", nil)
+	if err != nil {
+		return nil, fmt.Errorf("xentral: get settings: %w", err)
+	}
+	var s XentralSettings
+	if err := json.Unmarshal(body, &s); err != nil {
+		return nil, fmt.Errorf("xentral: decode settings: %w", err)
+	}
+	return &s, nil
+}
+
 // -------------------------------------------------------------------
 // Xentral data types
 // -------------------------------------------------------------------
+
+// XentralSettings represents the response from the undocumented /api/settings endpoint.
+// Fields are best-effort; the endpoint is not officially documented.
+type XentralSettings struct {
+	// Company / instance identity
+	CompanyName string `json:"companyName"`
+	// Alternate field names Xentral versions have used:
+	Firma    string `json:"firma"`
+	Name     string `json:"name"`
+	ShopName string `json:"shopName"`
+
+	// Version / edition
+	Version string `json:"version"`
+	Edition string `json:"edition"`
+
+	// Contact
+	Email    string `json:"email"`
+	Phone    string `json:"phone"`
+	Website  string `json:"website"`
+	Language string `json:"language"`
+	Currency string `json:"currency"`
+	Timezone string `json:"timezone"`
+
+	// Tax
+	TaxID string `json:"taxId"`
+	VATID string `json:"vatId"`
+
+	// Address (flat or nested – we try both)
+	Street  string `json:"street"`
+	ZIP     string `json:"zip"`
+	City    string `json:"city"`
+	Country string `json:"country"`
+}
+
+// ResolvedCompanyName returns the first non-empty company name field.
+func (s *XentralSettings) ResolvedCompanyName() string {
+	for _, v := range []string{s.CompanyName, s.Firma, s.Name, s.ShopName} {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 // XArticle represents a product/article record from Xentral.
 type XArticle struct {

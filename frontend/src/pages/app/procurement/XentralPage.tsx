@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link2, CheckCircle, XCircle, RefreshCw, Settings2, Clock, AlertCircle } from 'lucide-react';
+import { Link2, CheckCircle, XCircle, RefreshCw, Settings2, Clock, AlertCircle, Building2, Download } from 'lucide-react';
 import { toast } from 'sonner';
-import { xentralApi, type XentralConfig, type XentralSyncLog } from '../../../api/xentral';
+import { xentralApi, type XentralConfig, type XentralSyncLog, type XentralInstanceInfo } from '../../../api/xentral';
 import { useTenant } from '../../../contexts/TenantContext';
 
 const inputCls = 'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm focus:outline-none focus:border-primary-500';
@@ -51,8 +51,10 @@ export default function XentralPage() {
   const [form, setForm] = useState<Partial<XentralConfig & { apiToken: string }>>({});
   const [editingToken, setEditingToken] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [liveInstanceInfo, setLiveInstanceInfo] = useState<XentralInstanceInfo | null>(null);
   const [syncingEntity, setSyncingEntity] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
+  const [importingAccount, setImportingAccount] = useState(false);
 
   // Merge server config into local form state once loaded
   const merged: Partial<XentralConfig & { apiToken: string }> = {
@@ -89,6 +91,8 @@ export default function XentralPage() {
       const result = await xentralApi.testConnection();
       if (result.ok) {
         toast.success('Verbindung erfolgreich');
+        if (result.instanceInfo) setLiveInstanceInfo(result.instanceInfo);
+        qc.invalidateQueries({ queryKey: ['xentral-config'] });
       } else {
         toast.error(`Verbindung fehlgeschlagen: ${result.error}`);
       }
@@ -124,6 +128,18 @@ export default function XentralPage() {
       toast.error('Sync fehlgeschlagen');
     } finally {
       setSyncingAll(false);
+    }
+  };
+
+  const handleImportAccount = async () => {
+    setImportingAccount(true);
+    try {
+      const result = await xentralApi.importAccount();
+      toast.success(result.created ? 'Lieferantendatensatz angelegt' : 'Lieferantendatensatz aktualisiert');
+    } catch {
+      toast.error('Import fehlgeschlagen');
+    } finally {
+      setImportingAccount(false);
     }
   };
 
@@ -208,6 +224,48 @@ export default function XentralPage() {
             {testing ? 'Teste…' : 'Verbindung testen'}
           </button>
         </div>
+
+        {/* Instance info card — shown after successful test or when cached */}
+        {(() => {
+          const info = liveInstanceInfo ?? cfg?.instanceInfo;
+          if (!info?.companyName) return null;
+          return (
+            <div className="mt-2 bg-dark-800/60 border border-dark-700 rounded-lg p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-primary-400" />
+                  <span className="text-sm font-semibold text-white">{info.companyName}</span>
+                  {info.version && (
+                    <span className="px-1.5 py-0.5 rounded text-xs bg-dark-700 text-dark-400 font-mono">
+                      Xentral {info.version}{info.edition ? ' ' + info.edition : ''}
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={handleImportAccount}
+                  disabled={importingAccount}
+                  title="Firmenstammdaten als Lieferantendatensatz importieren"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-dark-700 text-dark-300 rounded-lg hover:bg-dark-600 hover:text-white disabled:opacity-50 text-xs">
+                  {importingAccount ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                  Firmenstammdaten importieren
+                </button>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-1 text-xs text-dark-400">
+                {info.street && <span>{info.street}, {info.zip} {info.city}{info.country ? ', ' + info.country : ''}</span>}
+                {info.email && <span>✉ {info.email}</span>}
+                {info.phone && <span>☎ {info.phone}</span>}
+                {info.website && <span>🌐 {info.website}</span>}
+                {info.taxId && <span>StNr: {info.taxId}</span>}
+                {info.vatId && <span>USt-IdNr: {info.vatId}</span>}
+                {info.currency && <span>Währung: {info.currency}</span>}
+                {info.language && <span>Sprache: {info.language}</span>}
+              </div>
+              {info.fetchedAt && (
+                <p className="text-xs text-dark-600">Zuletzt abgerufen: {fmt(info.fetchedAt)}</p>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Entity sync settings */}

@@ -6,12 +6,32 @@ const BASE = '/procurement/integrations/xentral';
 // Types
 // -------------------------------------------------------------------
 
+export interface XentralInstanceInfo {
+  companyName: string;
+  version: string;
+  edition: string;
+  email: string;
+  phone: string;
+  website: string;
+  language: string;
+  currency: string;
+  timezone: string;
+  taxId: string;
+  vatId: string;
+  street: string;
+  zip: string;
+  city: string;
+  country: string;
+  fetchedAt?: string;
+}
+
 export interface XentralConfig {
   id?: string;
   tenantId?: string;
   baseUrl: string;
   apiTokenMask?: string; // server-side masked token preview
   enabled: boolean;
+  instanceInfo?: XentralInstanceInfo; // populated by connection test
   syncIntervalH: number; // 0 = manual only
   syncProducts: boolean;
   syncCustomers: boolean;
@@ -63,7 +83,10 @@ export const xentralApi = {
     api.put(BASE, data),
 
   testConnection: () =>
-    api.post<{ ok: boolean; error?: string }>(`${BASE}/test`).then(r => r.data),
+    api.post<{ ok: boolean; error?: string; instanceInfo?: XentralInstanceInfo }>(`${BASE}/test`).then(r => r.data),
+
+  importAccount: () =>
+    api.post<{ created: boolean; supplierId: string }>(`${BASE}/import-account`).then(r => r.data),
 
   syncEntity: (entity: 'products' | 'customers' | 'suppliers' | 'orders') =>
     api.post<XentralSyncLog>(`${BASE}/sync/${entity}`).then(r => r.data),

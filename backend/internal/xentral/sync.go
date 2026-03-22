@@ -559,9 +559,12 @@ func (e *Engine) finishLog(ctx context.Context, log models.XentralSyncLog) model
 	return log
 }
 
-func truncate(s string, max int) string {
+// Truncate is the exported version used by the handlers package.
+func Truncate(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
 	return s[:max]
 }
+
+func truncate(s string, max int) string { return Truncate(s, max) }

@@ -6,15 +6,39 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+// XentralInstanceInfo caches the data returned by the undocumented /api/settings
+// endpoint. Populated on every successful connection test.
+type XentralInstanceInfo struct {
+	CompanyName string `json:"companyName" bson:"companyName"`
+	Version     string `json:"version" bson:"version"`
+	Edition     string `json:"edition" bson:"edition"`
+	Email       string `json:"email" bson:"email"`
+	Phone       string `json:"phone" bson:"phone"`
+	Website     string `json:"website" bson:"website"`
+	Language    string `json:"language" bson:"language"`
+	Currency    string `json:"currency" bson:"currency"`
+	Timezone    string `json:"timezone" bson:"timezone"`
+	TaxID       string `json:"taxId" bson:"taxId"`
+	VATID       string `json:"vatId" bson:"vatId"`
+	Street      string `json:"street" bson:"street"`
+	ZIP         string `json:"zip" bson:"zip"`
+	City        string `json:"city" bson:"city"`
+	Country     string `json:"country" bson:"country"`
+	FetchedAt   *time.Time `json:"fetchedAt,omitempty" bson:"fetchedAt,omitempty"`
+}
+
 // XentralConfig holds per-tenant connection settings for the Xentral ERP integration.
 // APIToken is stored server-side only and never serialised to JSON (json:"-").
 type XentralConfig struct {
 	ID           primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	TenantID     primitive.ObjectID `json:"tenantId" bson:"tenantId"`
-	BaseURL      string             `json:"baseUrl" bson:"baseUrl"`         // e.g. https://mycompany.xentral.biz
-	APIToken     string             `json:"-" bson:"apiToken"`              // never sent to client
+	BaseURL      string             `json:"baseUrl" bson:"baseUrl"`           // e.g. https://mycompany.xentral.biz
+	APIToken     string             `json:"-" bson:"apiToken"`                // never sent to client
 	APITokenMask string             `json:"apiTokenMask" bson:"apiTokenMask"` // last 4 chars for display
 	Enabled      bool               `json:"enabled" bson:"enabled"`
+
+	// Cached info from /api/settings, populated on successful connection test.
+	InstanceInfo *XentralInstanceInfo `json:"instanceInfo,omitempty" bson:"instanceInfo,omitempty"`
 
 	// Sync interval in hours; 0 = manual only
 	SyncIntervalH int `json:"syncIntervalH" bson:"syncIntervalH"`
