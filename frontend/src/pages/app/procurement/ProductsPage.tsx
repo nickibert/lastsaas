@@ -540,6 +540,20 @@ export default function ProductsPage() {
       defaultVisible: false,
       render: r => <span className="text-dark-400">{new Date(r.updatedAt).toLocaleDateString('de-DE')}</span>,
     },
+    {
+      key: 'actions',
+      header: '',
+      width: 'w-10',
+      render: r => (
+        <button
+          onClick={e => { e.stopPropagation(); startEdit(r); }}
+          className="p-1.5 text-dark-500 hover:text-primary-400 transition-colors rounded"
+          title="Bearbeiten"
+        >
+          <Pencil className="w-3.5 h-3.5" />
+        </button>
+      ),
+    },
   ];
 
   const productBulkActions: BulkAction<Product>[] = [
