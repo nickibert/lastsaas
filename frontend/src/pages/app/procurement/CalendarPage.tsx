@@ -163,13 +163,13 @@ function FreightDateModal({ arrival, onClose }: FreightDateModalProps) {
   };
 
   const mut = useMutation({
-    mutationFn: () => ordersApi.patchFreightDate(arrival.orderId, field, date),
+    mutationFn: () => ordersApi.patchFreightDate(arrival.orderId, arrival.freightIndex, field, date),
     onSuccess: () => { invalidate(); toast.success('Datum gespeichert'); onClose(); },
     onError: () => toast.error('Fehler beim Speichern'),
   });
 
   const clearMut = useMutation({
-    mutationFn: () => ordersApi.patchFreightDate(arrival.orderId, field, ''),
+    mutationFn: () => ordersApi.patchFreightDate(arrival.orderId, arrival.freightIndex, field, ''),
     onSuccess: () => { invalidate(); toast.success('Datum gelöscht'); onClose(); },
     onError: () => toast.error('Fehler beim Löschen'),
   });

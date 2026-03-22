@@ -182,6 +182,7 @@ export interface CalendarTask {
 export interface CalendarArrival {
   orderId: string;
   orderNumber: string;
+  freightIndex: number;
   estimatedDate: string;
   actualDate?: string;
   supplierName?: string;

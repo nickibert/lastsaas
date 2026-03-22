@@ -1768,11 +1768,12 @@ type calendarTask struct {
 }
 
 type calendarArrival struct {
-	OrderID         string `json:"orderId"`
-	OrderNumber     string `json:"orderNumber"`
-	EstimatedDate   string `json:"estimatedDate"`
-	ActualDate      string `json:"actualDate,omitempty"`
-	SupplierName    string `json:"supplierName,omitempty"`
+	OrderID       string `json:"orderId"`
+	OrderNumber   string `json:"orderNumber"`
+	FreightIndex  int    `json:"freightIndex"`
+	EstimatedDate string `json:"estimatedDate"`
+	ActualDate    string `json:"actualDate,omitempty"`
+	SupplierName  string `json:"supplierName,omitempty"`
 }
 
 func (h *ProcurementHandler) getCalendar(w http.ResponseWriter, r *http.Request) {
@@ -1913,13 +1914,14 @@ func (h *ProcurementHandler) getCalendar(w http.ResponseWriter, r *http.Request)
 		if o.SupplierID != nil {
 			supplierName = supplierMap[*o.SupplierID]
 		}
-		for _, f := range freights {
+		for fi, f := range freights {
 			if f.EstimatedArrival == nil && f.Arrival == nil {
 				continue
 			}
 			ca := calendarArrival{
 				OrderID:      o.ID.Hex(),
 				OrderNumber:  o.OrderNumber,
+				FreightIndex: fi,
 				SupplierName: supplierName,
 			}
 			if f.EstimatedArrival != nil {

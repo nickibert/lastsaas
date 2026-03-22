@@ -590,7 +590,7 @@ export default function OrderDetailPage() {
                 ['docOfOriginShipped', 'UZ versandt'],
               ] as const).map(([key, label]) => (
                 <label key={key} className="flex items-center gap-2 text-sm text-dark-300 cursor-pointer">
-                  <input type="checkbox" checked={!!(f as Record<string, unknown>)[key]}
+                  <input type="checkbox" checked={!!(f as unknown as Record<string, unknown>)[key]}
                     onChange={e => setFreightField(idx, key as keyof OrderFreight, e.target.checked)}
                     className="w-4 h-4 rounded border-dark-600 bg-dark-800 text-primary-500" />
                   {label}
