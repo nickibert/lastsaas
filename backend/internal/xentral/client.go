@@ -302,54 +302,17 @@ func (c *Client) ListSuppliers(ctx context.Context) ([]XSupplier, error) {
 }
 
 // ListPurchaseOrders fetches all purchase orders (Lieferantenbestellungen) from
-// Xentral across all pages using the v3 API.
-// Note: the list endpoint does not include lineItems; use GetPurchaseOrder for full detail.
+// Xentral using cursor pagination (x-pagination header). LineItems are included
+// in the list response by the v3 API.
 func (c *Client) ListPurchaseOrders(ctx context.Context) ([]XPurchaseOrder, error) {
-	var all []XPurchaseOrder
-	for page := 1; ; page++ {
-		batch, err := listPage[XPurchaseOrder](c, ctx, "/api/v3/purchaseOrders", page)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, batch...)
-		if len(batch) < pageSize {
-			break
-		}
-	}
-	return all, nil
-}
-
-// GetPurchaseOrder fetches a single purchase order by ID including its lineItems.
-func (c *Client) GetPurchaseOrder(ctx context.Context, id string) (*XPurchaseOrder, error) {
-	body, err := c.get(ctx, "/api/v3/purchaseOrders/"+id, nil)
-	if err != nil {
-		return nil, err
-	}
-	var result struct {
-		Data XPurchaseOrder `json:"data"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("xentral: decode purchaseOrder %s: %w", id, err)
-	}
-	return &result.Data, nil
+	return listAllCursor[XPurchaseOrder](c, ctx, "/api/v3/purchaseOrders")
 }
 
 // ListSalesOrders fetches all sales orders (Verkaufsaufträge) from Xentral
-// across all pages using the v3 API.
+// using cursor pagination (x-pagination header).
 // The v3 salesOrders endpoint requires the feature flag "api-v3-sales-orders" on the instance.
 func (c *Client) ListSalesOrders(ctx context.Context) ([]XSalesOrder, error) {
-	var all []XSalesOrder
-	for page := 1; ; page++ {
-		batch, err := listPage[XSalesOrder](c, ctx, "/api/v3/salesOrders", page)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, batch...)
-		if len(batch) < pageSize {
-			break
-		}
-	}
-	return all, nil
+	return listAllCursor[XSalesOrder](c, ctx, "/api/v3/salesOrders")
 }
 
 // PatchProductEAN pushes an EAN barcode back to the matching Xentral article.
@@ -374,16 +337,18 @@ func (c *Client) PatchProductFreefields(ctx context.Context, xentralArticleID st
 // HTTP helper
 // -------------------------------------------------------------------
 
-func (c *Client) get(ctx context.Context, path string, params url.Values) ([]byte, error) {
+// do executes a rate-limited GET with 429-retry.
+// extraHeaders are added to the outgoing request.
+// Returns the response body and headers.
+func (c *Client) do(ctx context.Context, path string, params url.Values, extraHeaders map[string]string) ([]byte, http.Header, error) {
 	const maxRetries = 3
 	for attempt := 0; ; attempt++ {
-		// Enforce rate limit: wait until minInterval has passed since the last request.
 		c.mu.Lock()
 		if wait := c.minInterval - time.Since(c.lastReqAt); wait > 0 {
 			c.mu.Unlock()
 			select {
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return nil, nil, ctx.Err()
 			case <-time.After(wait):
 			}
 			c.mu.Lock()
@@ -397,29 +362,31 @@ func (c *Client) get(ctx context.Context, path string, params url.Values) ([]byt
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
-			return nil, fmt.Errorf("xentral: build request: %w", err)
+			return nil, nil, fmt.Errorf("xentral: build request: %w", err)
 		}
 		req.Header.Set("Authorization", "Bearer "+c.token)
 		req.Header.Set("Accept", "application/json")
+		for k, v := range extraHeaders {
+			req.Header.Set(k, v)
+		}
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("xentral: request %s: %w", path, err)
+			return nil, nil, fmt.Errorf("xentral: request %s: %w", path, err)
 		}
 		body, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if readErr != nil {
-			return nil, fmt.Errorf("xentral: read body: %w", readErr)
+			return nil, nil, fmt.Errorf("xentral: read body: %w", readErr)
 		}
 
 		if resp.StatusCode == http.StatusUnauthorized {
-			return nil, fmt.Errorf("xentral: unauthorized – check API token")
+			return nil, nil, fmt.Errorf("xentral: unauthorized – check API token")
 		}
 		if resp.StatusCode == http.StatusTooManyRequests {
 			if attempt >= maxRetries {
-				return nil, fmt.Errorf("xentral: rate limit reached (after %d retries)", maxRetries)
+				return nil, nil, fmt.Errorf("xentral: rate limit reached (after %d retries)", maxRetries)
 			}
-			// Respect Retry-After header; default to 60 s.
 			retryAfter := 60 * time.Second
 			if s := resp.Header.Get("Retry-After"); s != "" {
 				if secs, err := strconv.Atoi(s); err == nil && secs > 0 {
@@ -428,16 +395,59 @@ func (c *Client) get(ctx context.Context, path string, params url.Values) ([]byt
 			}
 			select {
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return nil, nil, ctx.Err()
 			case <-time.After(retryAfter):
 			}
 			continue
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, fmt.Errorf("xentral: HTTP %d from %s: %s", resp.StatusCode, path, string(body))
+			return nil, nil, fmt.Errorf("xentral: HTTP %d from %s: %s", resp.StatusCode, path, string(body))
 		}
-		return body, nil
+		return body, resp.Header, nil
 	}
+}
+
+func (c *Client) get(ctx context.Context, path string, params url.Values) ([]byte, error) {
+	body, _, err := c.do(ctx, path, params, nil)
+	return body, err
+}
+
+// getCursor sends cursor in the x-pagination request header and returns
+// the response body plus the next cursor from the x-pagination response header.
+func (c *Client) getCursor(ctx context.Context, path string, params url.Values, cursor string) ([]byte, string, error) {
+	var hdrs map[string]string
+	if cursor != "" {
+		hdrs = map[string]string{"x-pagination": cursor}
+	}
+	body, respHdr, err := c.do(ctx, path, params, hdrs)
+	if err != nil {
+		return nil, "", err
+	}
+	return body, respHdr.Get("x-pagination"), nil
+}
+
+// listAllCursor fetches all pages of a v3 resource using cursor pagination
+// (x-pagination request/response header).
+func listAllCursor[T any](c *Client, ctx context.Context, path string) ([]T, error) {
+	params := url.Values{"page[size]": []string{fmt.Sprintf("%d", pageSize)}}
+	var all []T
+	cursor := ""
+	for {
+		body, nextCursor, err := c.getCursor(ctx, path, params, cursor)
+		if err != nil {
+			return nil, err
+		}
+		var result xList[T]
+		if err := json.Unmarshal(body, &result); err != nil {
+			return nil, fmt.Errorf("xentral: decode %s: %w", path, err)
+		}
+		all = append(all, result.Data...)
+		if nextCursor == "" {
+			break
+		}
+		cursor = nextCursor
+	}
+	return all, nil
 }
 
 // CreatePurchaseOrder creates a new purchase order in Xentral and returns the created ID.
