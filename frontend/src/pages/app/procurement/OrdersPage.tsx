@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
-import { Plus, Trash2, Eye } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ordersApi, suppliersApi, type Order, type DeliveryStatus, type PaymentStatus, type ReceiptStatus } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
@@ -284,96 +284,23 @@ export default function OrdersPage() {
       )}
 
       {/* Orders table */}
-      {isLoading ? (
-        <div className="text-dark-400">Lädt...</div>
-      ) : (
-        <div className="bg-dark-900/50 border border-dark-800 rounded-xl overflow-hidden">
-          <table className="w-full">
-            <thead className="border-b border-dark-800">
-              <tr>
-                <th className="text-left px-4 py-3 text-sm font-medium text-dark-400">Bestellung</th>
-                <th className="text-left px-4 py-3 text-sm font-medium text-dark-400">Datum</th>
-                <th className="text-left px-4 py-3 text-sm font-medium text-dark-400">Lieferant</th>
-                <th className="text-left px-4 py-3 text-sm font-medium text-dark-400">Status</th>
-                <th className="text-left px-4 py-3 text-sm font-medium text-dark-400">Inhalt</th>
-                <th className="text-right px-4 py-3 text-sm font-medium text-dark-400">Summe (USD)</th>
-                <th className="px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-dark-800/50">
-              {orders.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-dark-400">
-                    Keine Bestellungen gefunden
-                  </td>
-                </tr>
-              ) : (
-                orders.map(order => (
-                  <tr key={order.id} className="hover:bg-dark-800/30 transition-colors">
-                    <td className="px-4 py-3">
-                      <div className="font-mono text-sm text-white">{order.internalNumber || order.orderNumber || '—'}</div>
-                      {order.internalNumber && order.orderNumber && (
-                        <div className="font-mono text-xs text-dark-500">{order.orderNumber}</div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-dark-300 text-sm">
-                      {new Date(order.orderDate).toLocaleDateString('de-DE')}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      {order.supplierId
-                        ? <Link to={`/procurement/suppliers?highlight=${order.supplierId}`} className="text-dark-300 hover:text-primary-400 transition-colors">{supplierName(order.supplierId)}</Link>
-                        : <span className="text-dark-500">—</span>}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-1">
-                        {order.deliveryStatus && (
-                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${deliveryBadge[order.deliveryStatus]}`}>
-                            {deliveryLabel[order.deliveryStatus]}
-                          </span>
-                        )}
-                        {order.paymentStatus && (
-                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${paymentBadge[order.paymentStatus]}`}>
-                            {paymentLabel[order.paymentStatus]}
-                          </span>
-                        )}
-                        {order.receiptStatus && order.receiptStatus !== 'pending' && (
-                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${receiptBadge[order.receiptStatus]}`}>
-                            {receiptLabel[order.receiptStatus]}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-dark-300 text-sm">{order.orderContents || '—'}</td>
-                    <td className="px-4 py-3 text-right text-dark-300 text-sm font-mono">
-                      {order.orderSumUsd.toLocaleString('de-DE', { minimumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => navigate(`/procurement/orders/${order.id}`)}
-                          className="p-1 text-dark-400 hover:text-primary-400 transition-colors" title="Details">
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => {
-                            const label = order.internalNumber || order.orderNumber || order.id;
-                            if (confirm(`Bestellung ${label} löschen?`)) {
-                              deleteMutation.mutate(order.id);
-                            }
-                          }}
-                          className="p-1 text-dark-400 hover:text-red-400 transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-          <Pagination page={page} pages={pages} total={total} limit={limit} onPage={setPage} onLimit={l => { setLimit(l); setPage(1); }} />
-        </div>
-      )}
+      <DataTable
+        tableKey="orders"
+        columns={orderColumns}
+        data={orders}
+        getRowId={r => r.id}
+        searchValue={search}
+        onSearchChange={v => { setSearch(v); setPage(1); }}
+        searchPlaceholder="Bestellnummer oder Inhalt suchen..."
+        bulkActions={orderBulkActions}
+        onRowClick={row => navigate(`/procurement/orders/${row.id}`)}
+        emptyMessage="Keine Bestellungen gefunden"
+        isLoading={isLoading}
+        sortKey={sortKey}
+        sortDir={sortDir}
+        onSort={handleSort}
+      />
+      <Pagination page={page} pages={pages} total={total} limit={limit} onPage={setPage} onLimit={l => { setLimit(l); setPage(1); }} />
     </div>
   );
 }
