@@ -47,19 +47,25 @@ type XentralConfig struct {
 	SyncProducts        bool `json:"syncProducts" bson:"syncProducts"`
 	SyncCustomers       bool `json:"syncCustomers" bson:"syncCustomers"`
 	SyncSuppliers       bool `json:"syncSuppliers" bson:"syncSuppliers"`
-	SyncOrders          bool `json:"syncOrders" bson:"syncOrders"`                 // purchase orders
+	// SyncOrders: one-time import of purchase orders FROM Xentral (migration only).
+	// For ongoing sync LastSaaS is the SPoT: use PushOrdersToXentral instead.
+	SyncOrders          bool `json:"syncOrders" bson:"syncOrders"`
 	SyncSalesOrders     bool `json:"syncSalesOrders" bson:"syncSalesOrders"`       // sales orders (reorder planning)
 	SyncPurchasePrices  bool `json:"syncPurchasePrices" bson:"syncPurchasePrices"` // EK price lists from Xentral
 	SyncSalesPrices     bool `json:"syncSalesPrices" bson:"syncSalesPrices"`       // VK price lists from Xentral
 
-	// Outbound toggle (LastSaaS → Xentral): push EAN + freefields back to Xentral
-	PushProductsToXentral bool `json:"pushProductsToXentral" bson:"pushProductsToXentral"`
+	// Outbound toggles (LastSaaS → Xentral)
+	PushProductsToXentral bool `json:"pushProductsToXentral" bson:"pushProductsToXentral"` // EAN + freefields
+	// PushOrdersToXentral: LastSaaS is SPoT for purchase orders.
+	// On create/update in LastSaaS the PO is created/patched in Xentral.
+	PushOrdersToXentral   bool `json:"pushOrdersToXentral" bson:"pushOrdersToXentral"`
 
 	// Last successful sync timestamps per entity
 	LastSyncProducts       *time.Time `json:"lastSyncProducts,omitempty" bson:"lastSyncProducts,omitempty"`
 	LastSyncCustomers      *time.Time `json:"lastSyncCustomers,omitempty" bson:"lastSyncCustomers,omitempty"`
 	LastSyncSuppliers      *time.Time `json:"lastSyncSuppliers,omitempty" bson:"lastSyncSuppliers,omitempty"`
-	LastSyncOrders         *time.Time `json:"lastSyncOrders,omitempty" bson:"lastSyncOrders,omitempty"`
+	LastSyncOrders         *time.Time `json:"lastSyncOrders,omitempty" bson:"lastSyncOrders,omitempty"` // last import
+	LastPushOrders         *time.Time `json:"lastPushOrders,omitempty" bson:"lastPushOrders,omitempty"` // last push
 	LastSyncSalesOrders    *time.Time `json:"lastSyncSalesOrders,omitempty" bson:"lastSyncSalesOrders,omitempty"`
 	LastSyncPurchasePrices *time.Time `json:"lastSyncPurchasePrices,omitempty" bson:"lastSyncPurchasePrices,omitempty"`
 	LastSyncSalesPrices    *time.Time `json:"lastSyncSalesPrices,omitempty" bson:"lastSyncSalesPrices,omitempty"`

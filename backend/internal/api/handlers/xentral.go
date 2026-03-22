@@ -110,6 +110,7 @@ func (h *XentralHandler) saveConfig(w http.ResponseWriter, r *http.Request) {
 		SyncPurchasePrices    bool   `json:"syncPurchasePrices"`
 		SyncSalesPrices       bool   `json:"syncSalesPrices"`
 		PushProductsToXentral bool   `json:"pushProductsToXentral"`
+		PushOrdersToXentral   bool   `json:"pushOrdersToXentral"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
@@ -129,6 +130,7 @@ func (h *XentralHandler) saveConfig(w http.ResponseWriter, r *http.Request) {
 		"syncPurchasePrices":    req.SyncPurchasePrices,
 		"syncSalesPrices":       req.SyncSalesPrices,
 		"pushProductsToXentral": req.PushProductsToXentral,
+		"pushOrdersToXentral":   req.PushOrdersToXentral,
 		"updatedAt":             now,
 	}
 
@@ -467,11 +469,18 @@ func (h *XentralHandler) runSync(r *http.Request, tenantID primitive.ObjectID, e
 		log = h.engine.SyncSuppliers(r.Context(), tenantID, client)
 		h.db.XentralConfigs().UpdateOne(r.Context(), bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncSuppliers": now}}) //nolint
 	case "orders":
+		// "orders" = one-time import FROM Xentral (migration). For ongoing sync use "push_orders".
 		if !cfg.SyncOrders {
 			return skippedLog(tenantID, entity)
 		}
 		log = h.engine.SyncOrders(r.Context(), tenantID, client)
 		h.db.XentralConfigs().UpdateOne(r.Context(), bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncOrders": now}}) //nolint
+	case "push_orders":
+		if !cfg.PushOrdersToXentral {
+			return skippedLog(tenantID, entity)
+		}
+		log = h.engine.PushAllOrdersToXentral(r.Context(), tenantID, client)
+		h.db.XentralConfigs().UpdateOne(r.Context(), bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastPushOrders": now}}) //nolint
 	case "sales_orders":
 		if !cfg.SyncSalesOrders {
 			return skippedLog(tenantID, entity)

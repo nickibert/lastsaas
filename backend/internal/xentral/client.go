@@ -406,6 +406,72 @@ func (c *Client) get(ctx context.Context, path string, params url.Values) ([]byt
 	return body, nil
 }
 
+// CreatePurchaseOrder creates a new purchase order in Xentral and returns the created ID.
+// Endpoint: POST /api/v3/purchaseOrders
+func (c *Client) CreatePurchaseOrder(ctx context.Context, req XPOCreateRequest) (string, error) {
+	body, err := c.postJSON(ctx, "/api/v3/purchaseOrders", req)
+	if err != nil {
+		return "", err
+	}
+	var resp struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+		ID string `json:"id"` // some versions return flat
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return "", fmt.Errorf("xentral: parse create PO response: %w", err)
+	}
+	if resp.Data.ID != "" {
+		return resp.Data.ID, nil
+	}
+	return resp.ID, nil
+}
+
+// PatchPurchaseOrder updates an existing purchase order header in Xentral.
+// Endpoint: PATCH /api/v3/purchaseOrders/{id}
+func (c *Client) PatchPurchaseOrder(ctx context.Context, xentralID string, req XPOPatchRequest) error {
+	return c.patch(ctx, "/api/v3/purchaseOrders/"+xentralID, req)
+}
+
+// CreatePurchaseOrderLineItem adds a line item to an existing Xentral purchase order.
+// Endpoint: POST /api/v3/purchaseOrders/{id}/lineItems
+func (c *Client) CreatePurchaseOrderLineItem(ctx context.Context, purchaseOrderID string, item XPOLineItemCreate) error {
+	_, err := c.postJSON(ctx, "/api/v3/purchaseOrders/"+purchaseOrderID+"/lineItems", item)
+	return err
+}
+
+// -------------------------------------------------------------------
+// Purchase order write types
+// -------------------------------------------------------------------
+
+// XPOCreateRequest is the body for POST /api/v3/purchaseOrders.
+type XPOCreateRequest struct {
+	Supplier  XPORef              `json:"supplier"`
+	Date      string              `json:"date,omitempty"`      // "YYYY-MM-DD"
+	Notes     string              `json:"notes,omitempty"`
+	LineItems []XPOLineItemCreate `json:"lineItems,omitempty"` // included inline if API supports it
+}
+
+// XPOPatchRequest is the body for PATCH /api/v3/purchaseOrders/{id}.
+type XPOPatchRequest struct {
+	Date  string `json:"date,omitempty"`
+	Notes string `json:"notes,omitempty"`
+}
+
+// XPORef is a reference to a Xentral entity by ID.
+type XPORef struct {
+	ID string `json:"id"`
+}
+
+// XPOLineItemCreate is a line item for POST /api/v3/purchaseOrders/{id}/lineItems.
+type XPOLineItemCreate struct {
+	Article     XPORef  `json:"article"`
+	Description string  `json:"description,omitempty"`
+	Quantity    float64 `json:"quantity"`
+	UnitPrice   float64 `json:"unitPrice,omitempty"`
+}
+
 // ListPurchasePrices fetches all purchase price entries (EK-Preislisten) from Xentral.
 // Endpoint: GET /api/v1/purchasePrices
 func (c *Client) ListPurchasePrices(ctx context.Context) ([]XPurchasePrice, error) {
@@ -489,6 +555,51 @@ type XPriceProduct struct {
 type XPriceSupplier struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+func (c *Client) postJSON(ctx context.Context, path string, payload interface{}) ([]byte, error) {
+	c.mu.Lock()
+	if wait := c.minInterval - time.Since(c.lastReqAt); wait > 0 {
+		c.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
+		}
+		c.mu.Lock()
+	}
+	c.lastReqAt = time.Now()
+	c.mu.Unlock()
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("xentral: marshal post body: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(b))
+	if err != nil {
+		return nil, fmt.Errorf("xentral: build post request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("xentral: post %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, fmt.Errorf("xentral: unauthorized – check API token")
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, fmt.Errorf("xentral: rate limit reached")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("xentral: HTTP %d from %s: %s", resp.StatusCode, path, string(body))
+	}
+	return body, nil
 }
 
 func (c *Client) patch(ctx context.Context, path string, payload interface{}) error {

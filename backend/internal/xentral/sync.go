@@ -918,6 +918,153 @@ func parseDate(s string) *time.Time {
 	return &t
 }
 
+// -------------------------------------------------------------------
+// Push Purchase Orders (LastSaaS → Xentral)
+//
+// LastSaaS is the SPoT for purchase orders.
+// PushOrderToXentral is called after every create/update of an Order.
+// PushAllOrdersToXentral is used for initial setup or manual full re-sync.
+// -------------------------------------------------------------------
+
+// PushOrderToXentral creates or patches a single order in Xentral.
+// Returns the Xentral purchase order ID.
+func (e *Engine) PushOrderToXentral(ctx context.Context, tenantID, orderID primitive.ObjectID, client *Client) (string, error) {
+	var order models.Order
+	if err := e.db.Orders().FindOne(ctx, bson.M{"_id": orderID, "tenantId": tenantID}).Decode(&order); err != nil {
+		return "", fmt.Errorf("load order: %w", err)
+	}
+
+	// Resolve Xentral supplier ID
+	xSupplierID := e.resolveXentralID(ctx, tenantID, "supplier", order.SupplierID)
+	if xSupplierID == "" {
+		return "", fmt.Errorf("supplier not mapped to Xentral – sync suppliers first")
+	}
+
+	dateStr := order.OrderDate.Format("2006-01-02")
+	notes := order.Misc
+	if order.OrderContents != "" {
+		if notes != "" {
+			notes = order.OrderContents + "\n" + notes
+		} else {
+			notes = order.OrderContents
+		}
+	}
+
+	// Build line items (only those with a mapped Xentral article)
+	var lineItems []XPOLineItemCreate
+	for _, p := range order.Products {
+		xArticleID := e.resolveXentralID(ctx, tenantID, "product", &p.ProductID)
+		if xArticleID == "" {
+			continue // skip unmapped products
+		}
+		lineItems = append(lineItems, XPOLineItemCreate{
+			Article:   XPORef{ID: xArticleID},
+			Quantity:  float64(p.Quantity),
+			UnitPrice: p.UnitPriceUSD,
+		})
+	}
+
+	// Check if this order already exists in Xentral
+	var mapping models.XentralMapping
+	err := e.db.XentralMappings().FindOne(ctx, bson.M{
+		"tenantId": tenantID,
+		"entity":   "order",
+		"localId":  orderID,
+	}).Decode(&mapping)
+
+	now := time.Now()
+
+	if err == mongo.ErrNoDocuments {
+		// CREATE in Xentral
+		xentralID, createErr := client.CreatePurchaseOrder(ctx, XPOCreateRequest{
+			Supplier:  XPORef{ID: xSupplierID},
+			Date:      dateStr,
+			Notes:     notes,
+			LineItems: lineItems,
+		})
+		if createErr != nil {
+			return "", fmt.Errorf("create in Xentral: %w", createErr)
+		}
+		_, _ = e.db.XentralMappings().InsertOne(ctx, models.XentralMapping{
+			ID:        primitive.NewObjectID(),
+			TenantID:  tenantID,
+			Entity:    "order",
+			LocalID:   orderID,
+			XentralID: xentralID,
+			XentralNr: order.OrderNumber,
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+		return xentralID, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("lookup mapping: %w", err)
+	}
+
+	// PATCH header in Xentral (line items are not patched to avoid overwriting
+	// Xentral-side changes; use the manual sync for a full refresh)
+	if patchErr := client.PatchPurchaseOrder(ctx, mapping.XentralID, XPOPatchRequest{
+		Date:  dateStr,
+		Notes: notes,
+	}); patchErr != nil {
+		return "", fmt.Errorf("patch in Xentral: %w", patchErr)
+	}
+	_, _ = e.db.XentralMappings().UpdateOne(ctx,
+		bson.M{"_id": mapping.ID},
+		bson.M{"$set": bson.M{"xentralNr": order.OrderNumber, "updatedAt": now}},
+	)
+	return mapping.XentralID, nil
+}
+
+// PushAllOrdersToXentral pushes all orders for the tenant that are not yet in Xentral,
+// and patches those that are. Used for initial setup and scheduled full re-sync.
+func (e *Engine) PushAllOrdersToXentral(ctx context.Context, tenantID primitive.ObjectID, client *Client) models.XentralSyncLog {
+	log := models.XentralSyncLog{
+		ID:        primitive.NewObjectID(),
+		TenantID:  tenantID,
+		Entity:    "push_orders",
+		Status:    "running",
+		StartedAt: time.Now(),
+	}
+	e.db.XentralSyncLogs().InsertOne(ctx, log) //nolint
+
+	cursor, err := e.db.Orders().Find(ctx, bson.M{"tenantId": tenantID})
+	if err != nil {
+		return e.failLog(ctx, log, err.Error())
+	}
+	var orders []models.Order
+	_ = cursor.All(ctx, &orders)
+
+	for _, o := range orders {
+		if _, pushErr := e.PushOrderToXentral(ctx, tenantID, o.ID, client); pushErr != nil {
+			log.Errors = append(log.Errors, fmt.Sprintf("%s: %v", o.ID.Hex(), pushErr))
+			log.Skipped++
+		} else {
+			log.Updated++
+		}
+	}
+	return e.finishLog(ctx, log)
+}
+
+// resolveXentralID returns the Xentral UUID for a local ObjectID via the mappings table.
+// entity: "product", "supplier", "customer", etc.
+// Returns "" if not mapped.
+func (e *Engine) resolveXentralID(ctx context.Context, tenantID primitive.ObjectID, entity string, localID *primitive.ObjectID) string {
+	if localID == nil || *localID == (primitive.ObjectID{}) {
+		return ""
+	}
+	var m models.XentralMapping
+	err := e.db.XentralMappings().FindOne(ctx, bson.M{
+		"tenantId": tenantID,
+		"entity":   entity,
+		"localId":  localID,
+	}).Decode(&m)
+	if err != nil {
+		return ""
+	}
+	return m.XentralID
+}
+
 // resolveCustomerID looks up the local CustomerID for a Xentral customer ID.
 func (e *Engine) resolveCustomerID(ctx context.Context, tenantID primitive.ObjectID, xentralCustomerID string) *primitive.ObjectID {
 	if xentralCustomerID == "" {
@@ -966,8 +1113,10 @@ func runScheduledSyncs(ctx context.Context, database *db.MongoDB) {
 		"syncIntervalH": 1,
 		"syncProducts": 1, "syncCustomers": 1, "syncSuppliers": 1, "syncOrders": 1,
 		"syncSalesOrders": 1, "syncPurchasePrices": 1, "syncSalesPrices": 1,
+		"pushOrdersToXentral": 1,
 		"lastSyncProducts": 1, "lastSyncCustomers": 1, "lastSyncSuppliers": 1, "lastSyncOrders": 1,
 		"lastSyncSalesOrders": 1, "lastSyncPurchasePrices": 1, "lastSyncSalesPrices": 1,
+		"lastPushOrders": 1,
 	}))
 	if err != nil {
 		return
@@ -1036,6 +1185,14 @@ func runScheduledSyncs(ctx context.Context, database *db.MongoDB) {
 			database.XentralConfigs().UpdateOne(ctx, //nolint
 				bson.M{"tenantId": cfg.TenantID},
 				bson.M{"$set": bson.M{"lastSyncSalesPrices": t}},
+			)
+		}
+		if cfg.PushOrdersToXentral && isDue(cfg.LastPushOrders, now, interval) {
+			engine.PushAllOrdersToXentral(ctx, cfg.TenantID, client) //nolint
+			t := now
+			database.XentralConfigs().UpdateOne(ctx, //nolint
+				bson.M{"tenantId": cfg.TenantID},
+				bson.M{"$set": bson.M{"lastPushOrders": t}},
 			)
 		}
 	}
