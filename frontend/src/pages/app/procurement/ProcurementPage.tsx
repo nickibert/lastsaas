@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
-import { ShoppingCart, Package, Users, Ship, Anchor, Box, Globe, Tag, Gift, CalendarDays } from 'lucide-react';
+import { ShoppingCart, Package, Users, Ship, Anchor, Box, Globe, Tag, Gift, CalendarDays, UserCheck, Warehouse, Settings } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { ordersApi, productsApi, suppliersApi, freightCarriersApi, harboursApi, containersApi, countriesApi, goodsGroupsApi, offersApi } from '../../../api/procurement';
+import { ordersApi, productsApi, suppliersApi, freightCarriersApi, harboursApi, containersApi, countriesApi, goodsGroupsApi, offersApi, customersApi, stockApi } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
 
 export default function ProcurementPage() {
@@ -16,6 +16,8 @@ export default function ProcurementPage() {
   const { data: countriesData } = useQuery({ queryKey: ['countries', 1, 1], queryFn: () => countriesApi.list(1, 1), enabled, throwOnError: false });
   const { data: goodsGroupsData } = useQuery({ queryKey: ['goods-groups', 1, 1], queryFn: () => goodsGroupsApi.list(1, 1), enabled, throwOnError: false });
   const { data: offersData } = useQuery({ queryKey: ['offers', 1, 1], queryFn: () => offersApi.list(undefined, 1, 1), enabled, throwOnError: false });
+  const { data: customersData } = useQuery({ queryKey: ['customers', 1, 1], queryFn: () => customersApi.list(undefined, 1, 1), enabled, throwOnError: false });
+  const { data: stockData } = useQuery({ queryKey: ['stock-levels', 1, 1], queryFn: () => stockApi.listLevels({ page: 1, limit: 1 }), enabled, throwOnError: false });
 
   const tiles = [
     {
@@ -97,6 +99,30 @@ export default function ProcurementPage() {
       to: '/procurement/calendar',
       color: 'text-violet-400',
       bg: 'bg-violet-500/20',
+    },
+    {
+      icon: UserCheck,
+      label: 'Kunden',
+      count: customersData?.total ?? null,
+      to: '/procurement/customers',
+      color: 'text-cyan-400',
+      bg: 'bg-cyan-500/20',
+    },
+    {
+      icon: Warehouse,
+      label: 'Lager',
+      count: stockData?.total ?? null,
+      to: '/procurement/inventory',
+      color: 'text-lime-400',
+      bg: 'bg-lime-500/20',
+    },
+    {
+      icon: Settings,
+      label: 'Konfiguration',
+      count: null,
+      to: '/procurement/config',
+      color: 'text-dark-400',
+      bg: 'bg-dark-700/50',
     },
   ];
 

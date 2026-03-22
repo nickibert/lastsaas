@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"strconv"
@@ -135,6 +137,27 @@ func (h *ProcurementHandler) RegisterRoutes(r *mux.Router, authMW mux.Middleware
 	s.HandleFunc("/calendar/entries", h.createCalendarEntry).Methods(http.MethodPost)
 	s.HandleFunc("/calendar/entries/{id}", h.updateCalendarEntry).Methods(http.MethodPut)
 	s.HandleFunc("/calendar/entries/{id}", h.deleteCalendarEntry).Methods(http.MethodDelete)
+
+	// Task templates
+	s.HandleFunc("/task-templates", h.listTaskTemplates).Methods(http.MethodGet)
+	s.HandleFunc("/task-templates", h.createTaskTemplate).Methods(http.MethodPost)
+	s.HandleFunc("/task-templates/{id}", h.updateTaskTemplate).Methods(http.MethodPut)
+	s.HandleFunc("/task-templates/{id}", h.deleteTaskTemplate).Methods(http.MethodDelete)
+
+	// Customers
+	s.HandleFunc("/customers", h.listCustomers).Methods(http.MethodGet)
+	s.HandleFunc("/customers", h.createCustomer).Methods(http.MethodPost)
+	s.HandleFunc("/customers/{id}", h.getCustomer).Methods(http.MethodGet)
+	s.HandleFunc("/customers/{id}", h.updateCustomer).Methods(http.MethodPut)
+	s.HandleFunc("/customers/{id}", h.deleteCustomer).Methods(http.MethodDelete)
+
+	// Stock movements (Wareneingang / Warenausgang)
+	s.HandleFunc("/stock/movements", h.listStockMovements).Methods(http.MethodGet)
+	s.HandleFunc("/stock/movements", h.createStockMovement).Methods(http.MethodPost)
+	s.HandleFunc("/stock/movements/{id}", h.deleteStockMovement).Methods(http.MethodDelete)
+
+	// Stock levels (Lagerbestand)
+	s.HandleFunc("/stock/levels", h.listStockLevels).Methods(http.MethodGet)
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +296,7 @@ func (h *ProcurementHandler) updateSupplier(w http.ResponseWriter, r *http.Reque
 		"skype":     doc.Skype,
 		"origin":    doc.Origin,
 		"misc":      doc.Misc,
+		"tags":      doc.Tags,
 		"updatedAt": doc.UpdatedAt,
 	}}
 	res, err := h.db.Suppliers().UpdateOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID}, update)
@@ -488,28 +512,47 @@ func (h *ProcurementHandler) listProducts(w http.ResponseWriter, r *http.Request
 		return
 	}
 	filter := bson.M{"tenantId": tenantID}
+	andClauses := bson.A{}
+
 	if q := r.URL.Query().Get("q"); q != "" {
-		filter["$or"] = bson.A{
+		andClauses = append(andClauses, bson.M{"$or": bson.A{
 			bson.M{"nameShort": bson.M{"$regex": q, "$options": "i"}},
 			bson.M{"ownNameShort": bson.M{"$regex": q, "$options": "i"}},
 			bson.M{"nameLong": bson.M{"$regex": q, "$options": "i"}},
 			bson.M{"ean": bson.M{"$regex": q, "$options": "i"}},
-		}
+		}})
 	}
 	if sid := r.URL.Query().Get("supplierId"); sid != "" {
 		if oid, err := primitive.ObjectIDFromHex(sid); err == nil {
-			// Match products where supplierId OR supplierIds contains the given supplier
-			supplierFilter := bson.M{"$or": bson.A{
+			andClauses = append(andClauses, bson.M{"$or": bson.A{
 				bson.M{"supplierId": oid},
 				bson.M{"supplierIds": oid},
-			}}
-			if _, hasOr := filter["$or"]; hasOr {
-				// Combine with existing $or via $and
-				filter = bson.M{"$and": bson.A{filter, supplierFilter}}
-			} else {
-				filter["$or"] = supplierFilter["$or"]
-			}
+			}})
 		}
+	}
+	if ggid := r.URL.Query().Get("goodsGroupId"); ggid != "" {
+		if oid, err := primitive.ObjectIDFromHex(ggid); err == nil {
+			filter["goodsGroupId"] = oid
+		}
+	}
+	// Filter by tag (exact match, case-insensitive)
+	if tag := r.URL.Query().Get("tag"); tag != "" {
+		filter["tags"] = bson.M{"$regex": "^" + tag + "$", "$options": "i"}
+	}
+	// Filter by attribute key
+	if attrKey := r.URL.Query().Get("attrKey"); attrKey != "" {
+		attrFilter := bson.M{"attributes": bson.M{"$elemMatch": bson.M{"key": bson.M{"$regex": attrKey, "$options": "i"}}}}
+		if attrVal := r.URL.Query().Get("attrValue"); attrVal != "" {
+			attrFilter = bson.M{"attributes": bson.M{"$elemMatch": bson.M{
+				"key":   bson.M{"$regex": attrKey, "$options": "i"},
+				"value": bson.M{"$regex": attrVal, "$options": "i"},
+			}}}
+		}
+		andClauses = append(andClauses, attrFilter)
+	}
+
+	if len(andClauses) > 0 {
+		filter["$and"] = andClauses
 	}
 	page, pageSize, skip := parsePagination(r)
 	total, _ := h.db.Products().CountDocuments(r.Context(), filter)
@@ -1012,6 +1055,21 @@ func (h *ProcurementHandler) listOrders(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+func (h *ProcurementHandler) nextOrderNumber(ctx context.Context, tenantID primitive.ObjectID) string {
+	counterKey := "order_number_" + tenantID.Hex()
+	var result struct {
+		Value int64 `bson:"value"`
+	}
+	opts := options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)
+	_ = h.db.Counters().FindOneAndUpdate(ctx,
+		bson.M{"_id": counterKey},
+		bson.M{"$inc": bson.M{"value": 1}},
+		opts,
+	).Decode(&result)
+	year := time.Now().UTC().Year()
+	return fmt.Sprintf("EK-%d-%04d", year, result.Value)
+}
+
 func (h *ProcurementHandler) createOrder(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := procurementTenantID(r)
 	if !ok {
@@ -1027,6 +1085,20 @@ func (h *ProcurementHandler) createOrder(w http.ResponseWriter, r *http.Request)
 	doc.TenantID = tenantID
 	doc.CreatedAt = time.Now().UTC()
 	doc.UpdatedAt = doc.CreatedAt
+	// Auto-generate internal number if not provided
+	if doc.InternalNumber == "" {
+		doc.InternalNumber = h.nextOrderNumber(r.Context(), tenantID)
+	}
+	// Set default statuses
+	if doc.DeliveryStatus == "" {
+		doc.DeliveryStatus = "pending"
+	}
+	if doc.PaymentStatus == "" {
+		doc.PaymentStatus = "unpaid"
+	}
+	if doc.ReceiptStatus == "" {
+		doc.ReceiptStatus = "pending"
+	}
 	if _, err := h.db.Orders().InsertOne(r.Context(), doc); err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
@@ -1202,8 +1274,17 @@ func (h *ProcurementHandler) updateOrderTask(w http.ResponseWriter, r *http.Requ
 	json.NewDecoder(r.Body).Decode(&doc) //nolint
 	doc.UpdatedAt = time.Now().UTC()
 	h.db.OrderTasks().UpdateOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID},
-		bson.M{"$set": bson.M{"text": doc.Text, "dueDate": doc.DueDate, "doneAt": doc.DoneAt,
-			"doneById": doc.DoneByID, "assigneeId": doc.AssigneeID, "updatedAt": doc.UpdatedAt}}) //nolint
+		bson.M{"$set": bson.M{
+			"title":      doc.Title,
+			"text":       doc.Text,
+			"status":     doc.Status,
+			"priority":   doc.Priority,
+			"dueDate":    doc.DueDate,
+			"doneAt":     doc.DoneAt,
+			"doneById":   doc.DoneByID,
+			"assigneeId": doc.AssigneeID,
+			"updatedAt":  doc.UpdatedAt,
+		}}) //nolint
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1949,4 +2030,354 @@ func (h *ProcurementHandler) deleteCalendarEntry(w http.ResponseWriter, r *http.
 	}
 	h.db.CalendarEntries().DeleteOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID}) //nolint
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------------------
+// Task Templates
+// ---------------------------------------------------------------------------
+
+func (h *ProcurementHandler) listTaskTemplates(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	cursor, _ := h.db.OrderTasks().Database().Collection("task_templates").Find(r.Context(),
+		bson.M{"tenantId": tenantID},
+		options.Find().SetSort(bson.D{{Key: "phase", Value: 1}, {Key: "daysAfter", Value: 1}}))
+	results := make([]models.TaskTemplate, 0)
+	cursor.All(r.Context(), &results) //nolint
+	writeJSON(w, http.StatusOK, results)
+}
+
+func (h *ProcurementHandler) createTaskTemplate(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var doc models.TaskTemplate
+	json.NewDecoder(r.Body).Decode(&doc) //nolint
+	doc.ID = primitive.NewObjectID()
+	doc.TenantID = tenantID
+	doc.CreatedAt = time.Now().UTC()
+	doc.UpdatedAt = doc.CreatedAt
+	h.db.OrderTasks().Database().Collection("task_templates").InsertOne(r.Context(), doc) //nolint
+	writeJSON(w, http.StatusCreated, doc)
+}
+
+func (h *ProcurementHandler) updateTaskTemplate(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var doc models.TaskTemplate
+	json.NewDecoder(r.Body).Decode(&doc) //nolint
+	doc.UpdatedAt = time.Now().UTC()
+	h.db.OrderTasks().Database().Collection("task_templates").UpdateOne(r.Context(),
+		bson.M{"_id": id, "tenantId": tenantID},
+		bson.M{"$set": bson.M{"text": doc.Text, "daysAfter": doc.DaysAfter, "phase": doc.Phase, "updatedAt": doc.UpdatedAt}}) //nolint
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *ProcurementHandler) deleteTaskTemplate(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	h.db.OrderTasks().Database().Collection("task_templates").DeleteOne(r.Context(),
+		bson.M{"_id": id, "tenantId": tenantID}) //nolint
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------------------
+// Customers
+// ---------------------------------------------------------------------------
+
+func (h *ProcurementHandler) listCustomers(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	filter := bson.M{"tenantId": tenantID}
+	if q := r.URL.Query().Get("q"); q != "" {
+		filter["$or"] = bson.A{
+			bson.M{"company": bson.M{"$regex": q, "$options": "i"}},
+			bson.M{"firstname": bson.M{"$regex": q, "$options": "i"}},
+			bson.M{"lastname": bson.M{"$regex": q, "$options": "i"}},
+			bson.M{"email": bson.M{"$regex": q, "$options": "i"}},
+		}
+	}
+	page, limit, skip := parsePagination(r)
+	total, _ := h.db.Customers().CountDocuments(r.Context(), filter)
+	cursor, err := h.db.Customers().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "company", Value: 1}}).SetSkip(skip).SetLimit(limit))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	results := make([]models.Customer, 0)
+	cursor.All(r.Context(), &results) //nolint
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": results,
+		"total": total,
+		"page":  page,
+		"pages": (total + limit - 1) / limit,
+	})
+}
+
+func (h *ProcurementHandler) createCustomer(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var doc models.Customer
+	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	doc.ID = primitive.NewObjectID()
+	doc.TenantID = tenantID
+	doc.CreatedAt = time.Now().UTC()
+	doc.UpdatedAt = doc.CreatedAt
+	if _, err := h.db.Customers().InsertOne(r.Context(), doc); err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusCreated, doc)
+}
+
+func (h *ProcurementHandler) getCustomer(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var doc models.Customer
+	if err := h.db.Customers().FindOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID}).Decode(&doc); err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, doc)
+}
+
+func (h *ProcurementHandler) updateCustomer(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var doc models.Customer
+	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	doc.UpdatedAt = time.Now().UTC()
+	h.db.Customers().UpdateOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID},
+		bson.M{"$set": bson.M{
+			"company":   doc.Company,
+			"firstname": doc.Firstname,
+			"lastname":  doc.Lastname,
+			"email":     doc.Email,
+			"phone":     doc.Phone,
+			"address":   doc.Address,
+			"misc":      doc.Misc,
+			"tags":      doc.Tags,
+			"updatedAt": doc.UpdatedAt,
+		}}) //nolint
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *ProcurementHandler) deleteCustomer(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	h.db.Customers().DeleteOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID}) //nolint
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------------------
+// Stock Movements & Levels
+// ---------------------------------------------------------------------------
+
+func (h *ProcurementHandler) listStockMovements(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	filter := bson.M{"tenantId": tenantID}
+	if pid := r.URL.Query().Get("productId"); pid != "" {
+		if oid, err := primitive.ObjectIDFromHex(pid); err == nil {
+			filter["productId"] = oid
+		}
+	}
+	if t := r.URL.Query().Get("type"); t != "" {
+		filter["type"] = t
+	}
+	page, limit, skip := parsePagination(r)
+	total, _ := h.db.StockMovements().CountDocuments(r.Context(), filter)
+	cursor, err := h.db.StockMovements().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "movedAt", Value: -1}}).SetSkip(skip).SetLimit(limit))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	results := make([]models.StockMovement, 0)
+	cursor.All(r.Context(), &results) //nolint
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": results,
+		"total": total,
+		"page":  page,
+		"pages": (total + limit - 1) / limit,
+	})
+}
+
+func (h *ProcurementHandler) createStockMovement(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var userID primitive.ObjectID
+	if u, ok := middleware.GetUserFromContext(r.Context()); ok {
+		userID = u.ID
+	}
+	var doc models.StockMovement
+	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if doc.ProductID.IsZero() {
+		http.Error(w, "productId required", http.StatusBadRequest)
+		return
+	}
+	doc.ID = primitive.NewObjectID()
+	doc.TenantID = tenantID
+	doc.ProcessedBy = userID
+	if doc.MovedAt.IsZero() {
+		doc.MovedAt = time.Now().UTC()
+	}
+	doc.CreatedAt = time.Now().UTC()
+	doc.UpdatedAt = doc.CreatedAt
+
+	if _, err := h.db.StockMovements().InsertOne(r.Context(), doc); err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+
+	// Update stock level
+	delta := doc.Quantity
+	if doc.Type == "issue" {
+		delta = -doc.Quantity
+	}
+	levelOpts := options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)
+	var level models.StockLevel
+	_ = h.db.StockLevels().FindOneAndUpdate(r.Context(),
+		bson.M{"tenantId": tenantID, "productId": doc.ProductID},
+		bson.M{
+			"$inc": bson.M{"quantity": delta},
+			"$set": bson.M{"updatedAt": time.Now().UTC(), "unit": doc.Unit, "location": doc.Location},
+			"$setOnInsert": bson.M{"tenantId": tenantID, "productId": doc.ProductID},
+		},
+		levelOpts,
+	).Decode(&level)
+
+	writeJSON(w, http.StatusCreated, doc)
+}
+
+func (h *ProcurementHandler) deleteStockMovement(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	// Fetch movement first to reverse the stock delta
+	var doc models.StockMovement
+	if err := h.db.StockMovements().FindOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID}).Decode(&doc); err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	h.db.StockMovements().DeleteOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID}) //nolint
+
+	// Reverse stock level update
+	delta := -doc.Quantity
+	if doc.Type == "issue" {
+		delta = doc.Quantity
+	}
+	h.db.StockLevels().UpdateOne(r.Context(),
+		bson.M{"tenantId": tenantID, "productId": doc.ProductID},
+		bson.M{"$inc": bson.M{"quantity": delta}, "$set": bson.M{"updatedAt": time.Now().UTC()}}) //nolint
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *ProcurementHandler) listStockLevels(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	filter := bson.M{"tenantId": tenantID}
+	if pid := r.URL.Query().Get("productId"); pid != "" {
+		if oid, err := primitive.ObjectIDFromHex(pid); err == nil {
+			filter["productId"] = oid
+		}
+	}
+	// Optionally only show non-zero levels
+	if r.URL.Query().Get("nonZero") == "true" {
+		filter["quantity"] = bson.M{"$ne": 0}
+	}
+	page, limit, skip := parsePagination(r)
+	total, _ := h.db.StockLevels().CountDocuments(r.Context(), filter)
+	cursor, err := h.db.StockLevels().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "updatedAt", Value: -1}}).SetSkip(skip).SetLimit(limit))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	results := make([]models.StockLevel, 0)
+	cursor.All(r.Context(), &results) //nolint
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": results,
+		"total": total,
+		"page":  page,
+		"pages": (total + limit - 1) / limit,
+	})
 }

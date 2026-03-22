@@ -303,7 +303,10 @@ export default function OrderDetailPage() {
             <ArrowLeft className="w-5 h-5" />
           </Link>
           <div>
-            <h1 className="text-2xl font-bold text-white font-mono">{order.orderNumber}</h1>
+            <h1 className="text-2xl font-bold text-white font-mono">{order.internalNumber || order.orderNumber || '—'}</h1>
+            {order.internalNumber && order.orderNumber && (
+              <p className="text-dark-500 text-xs font-mono mt-0.5">Lieferant: {order.orderNumber}</p>
+            )}
             <p className="text-dark-400 text-sm mt-0.5">Bestelldetails</p>
           </div>
         </div>
@@ -321,8 +324,13 @@ export default function OrderDetailPage() {
       <Section title="Grunddaten">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className={labelCls}>Bestellnummer *</label>
-            <input type="text" value={draft.orderNumber ?? ''} onChange={e => set('orderNumber', e.target.value)} className={inputCls} />
+            <label className={labelCls}>Interne Nr. (automatisch)</label>
+            <input type="text" value={draft.internalNumber ?? ''} readOnly disabled
+              className={`${inputCls} opacity-50 cursor-not-allowed`} placeholder="Wird beim Speichern vergeben" />
+          </div>
+          <div>
+            <label className={labelCls}>Lieferanten-Bestellnr.</label>
+            <input type="text" value={draft.orderNumber ?? ''} onChange={e => set('orderNumber', e.target.value || undefined)} className={inputCls} />
           </div>
           <DateInput label="Bestelldatum" value={draft.orderDate} onChange={v => set('orderDate', v)} />
           <div>
@@ -330,6 +338,31 @@ export default function OrderDetailPage() {
             <select value={draft.supplierId ?? ''} onChange={e => set('supplierId', e.target.value || undefined)} className={inputCls}>
               <option value="">— auswählen —</option>
               {suppliers.map(s => <option key={s.id} value={s.id}>{s.company}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>Lieferstatus</label>
+            <select value={draft.deliveryStatus ?? 'pending'} onChange={e => set('deliveryStatus', e.target.value)} className={inputCls}>
+              <option value="pending">Ausstehend</option>
+              <option value="shipped">Verschifft</option>
+              <option value="delivered">Geliefert</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>Zahlstatus</label>
+            <select value={draft.paymentStatus ?? 'unpaid'} onChange={e => set('paymentStatus', e.target.value)} className={inputCls}>
+              <option value="unpaid">Unbezahlt</option>
+              <option value="partial">Teilbezahlt</option>
+              <option value="paid">Bezahlt</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>Wareneingangsstatus</label>
+            <select value={draft.receiptStatus ?? 'pending'} onChange={e => set('receiptStatus', e.target.value)} className={inputCls}>
+              <option value="pending">Ausstehend</option>
+              <option value="partial">Teileingang</option>
+              <option value="received">Wareneingang</option>
+              <option value="distributed">Eingelagert</option>
             </select>
           </div>
           <div className="md:col-span-2">
@@ -767,20 +800,32 @@ export default function OrderDetailPage() {
           {tasks.length === 0 && (
             <p className="text-dark-500 text-sm">Keine Aufgaben</p>
           )}
-          {tasks.map(task => (
-            <div key={task.id} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${task.doneAt ? 'bg-dark-800/20' : 'bg-dark-800/50'}`}>
-              <button onClick={() => toggleTaskMutation.mutate(task)}
-                className={`w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 transition-colors ${task.doneAt ? 'bg-primary-500 border-primary-500 text-white' : 'border-dark-600 hover:border-primary-400'}`}>
-                {task.doneAt && <Check className="w-3 h-3" />}
-              </button>
-              <span className={`flex-1 ${task.doneAt ? 'line-through text-dark-500' : 'text-dark-200'}`}>{task.text}</span>
-              {task.dueDate && (
-                <span className="text-dark-500 text-xs">{new Date(task.dueDate).toLocaleDateString('de-DE')}</span>
-              )}
-              <button onClick={() => deleteTaskMutation.mutate(task.id)}
-                className="p-1 text-dark-500 hover:text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
-            </div>
-          ))}
+          {tasks.map(task => {
+            const isDone = task.status === 'done' || !!task.doneAt;
+            const priorityCls = task.priority === 'high' ? 'text-red-400' : task.priority === 'medium' ? 'text-amber-400' : 'text-dark-500';
+            const statusCls = task.status === 'done' ? 'bg-emerald-500/20 text-emerald-400' : task.status === 'in_progress' ? 'bg-blue-500/20 text-blue-400' : 'bg-dark-700 text-dark-400';
+            const statusLabel = task.status === 'done' ? 'Erledigt' : task.status === 'in_progress' ? 'In Arbeit' : 'Offen';
+            return (
+              <div key={task.id} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${isDone ? 'bg-dark-800/20' : 'bg-dark-800/50'}`}>
+                <button onClick={() => toggleTaskMutation.mutate(task)}
+                  className={`w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 transition-colors ${isDone ? 'bg-primary-500 border-primary-500 text-white' : 'border-dark-600 hover:border-primary-400'}`}>
+                  {isDone && <Check className="w-3 h-3" />}
+                </button>
+                <span className={`flex-1 ${isDone ? 'line-through text-dark-500' : 'text-dark-200'}`}>
+                  {task.title || task.text}
+                </span>
+                <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${statusCls}`}>{statusLabel}</span>
+                {task.priority && task.priority !== 'low' && (
+                  <span className={`text-xs font-medium ${priorityCls}`}>{task.priority === 'high' ? '↑ Hoch' : '→ Mittel'}</span>
+                )}
+                {task.dueDate && (
+                  <span className="text-dark-500 text-xs">{new Date(task.dueDate).toLocaleDateString('de-DE')}</span>
+                )}
+                <button onClick={() => deleteTaskMutation.mutate(task.id)}
+                  className="p-1 text-dark-500 hover:text-red-400"><Trash2 className="w-3.5 h-3.5" /></button>
+              </div>
+            );
+          })}
         </div>
         <div className="flex gap-2">
           <input type="text" value={newTaskText} onChange={e => setNewTaskText(e.target.value)}

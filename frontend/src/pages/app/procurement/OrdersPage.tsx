@@ -4,9 +4,42 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search, Trash2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
-import { ordersApi, suppliersApi, type Order } from '../../../api/procurement';
+import { ordersApi, suppliersApi, type Order, type DeliveryStatus, type PaymentStatus, type ReceiptStatus } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
 import { Pagination } from '../../../components/Pagination';
+
+const deliveryBadge: Record<DeliveryStatus, string> = {
+  pending: 'bg-dark-700 text-dark-300',
+  shipped: 'bg-blue-500/20 text-blue-400',
+  delivered: 'bg-emerald-500/20 text-emerald-400',
+};
+const deliveryLabel: Record<DeliveryStatus, string> = {
+  pending: 'Ausstehend',
+  shipped: 'Verschifft',
+  delivered: 'Geliefert',
+};
+const paymentBadge: Record<PaymentStatus, string> = {
+  unpaid: 'bg-red-500/20 text-red-400',
+  partial: 'bg-amber-500/20 text-amber-400',
+  paid: 'bg-emerald-500/20 text-emerald-400',
+};
+const paymentLabel: Record<PaymentStatus, string> = {
+  unpaid: 'Unbezahlt',
+  partial: 'Teilbezahlt',
+  paid: 'Bezahlt',
+};
+const receiptBadge: Record<ReceiptStatus, string> = {
+  pending: 'bg-dark-700 text-dark-300',
+  partial: 'bg-amber-500/20 text-amber-400',
+  received: 'bg-teal-500/20 text-teal-400',
+  distributed: 'bg-emerald-500/20 text-emerald-400',
+};
+const receiptLabel: Record<ReceiptStatus, string> = {
+  pending: 'Ausstehend',
+  partial: 'Teileingang',
+  received: 'Wareneingang',
+  distributed: 'Eingelagert',
+};
 
 export default function OrdersPage() {
   const qc = useQueryClient();
@@ -103,12 +136,13 @@ export default function OrdersPage() {
           <h2 className="text-lg font-semibold text-white">Neue Bestellung</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm text-dark-400 mb-1">Bestellnummer *</label>
+              <label className="block text-sm text-dark-400 mb-1">Lieferanten-Bestellnr. <span className="text-dark-500">(optional)</span></label>
               <input
                 type="text"
-                value={form.orderNumber}
-                onChange={e => setForm(f => ({ ...f, orderNumber: e.target.value }))}
-                className="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white focus:outline-none focus:border-primary-500"
+                value={form.orderNumber ?? ''}
+                placeholder="Wird automatisch vergeben"
+                onChange={e => setForm(f => ({ ...f, orderNumber: e.target.value || undefined }))}
+                className="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white placeholder-dark-600 focus:outline-none focus:border-primary-500"
               />
             </div>
             <div>
@@ -156,7 +190,7 @@ export default function OrdersPage() {
           <div className="flex gap-3">
             <button
               onClick={() => createMutation.mutate(form)}
-              disabled={!form.orderNumber || createMutation.isPending}
+              disabled={createMutation.isPending}
               className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50"
             >
               {createMutation.isPending ? 'Wird angelegt...' : 'Anlegen'}
@@ -179,9 +213,10 @@ export default function OrdersPage() {
           <table className="w-full">
             <thead className="border-b border-dark-800">
               <tr>
-                <th className="text-left px-4 py-3 text-sm font-medium text-dark-400">Bestellnummer</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-dark-400">Bestellung</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-dark-400">Datum</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-dark-400">Lieferant</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-dark-400">Status</th>
                 <th className="text-left px-4 py-3 text-sm font-medium text-dark-400">Inhalt</th>
                 <th className="text-right px-4 py-3 text-sm font-medium text-dark-400">Summe (USD)</th>
                 <th className="px-4 py-3"></th>
@@ -190,18 +225,42 @@ export default function OrdersPage() {
             <tbody className="divide-y divide-dark-800/50">
               {orders.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-dark-400">
+                  <td colSpan={7} className="px-4 py-8 text-center text-dark-400">
                     Keine Bestellungen gefunden
                   </td>
                 </tr>
               ) : (
                 orders.map(order => (
                   <tr key={order.id} className="hover:bg-dark-800/30 transition-colors">
-                    <td className="px-4 py-3 text-white font-mono text-sm">{order.orderNumber}</td>
+                    <td className="px-4 py-3">
+                      <div className="font-mono text-sm text-white">{order.internalNumber || order.orderNumber || '—'}</div>
+                      {order.internalNumber && order.orderNumber && (
+                        <div className="font-mono text-xs text-dark-500">{order.orderNumber}</div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-dark-300 text-sm">
                       {new Date(order.orderDate).toLocaleDateString('de-DE')}
                     </td>
                     <td className="px-4 py-3 text-dark-300 text-sm">{supplierName(order.supplierId)}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {order.deliveryStatus && (
+                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${deliveryBadge[order.deliveryStatus]}`}>
+                            {deliveryLabel[order.deliveryStatus]}
+                          </span>
+                        )}
+                        {order.paymentStatus && (
+                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${paymentBadge[order.paymentStatus]}`}>
+                            {paymentLabel[order.paymentStatus]}
+                          </span>
+                        )}
+                        {order.receiptStatus && order.receiptStatus !== 'pending' && (
+                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${receiptBadge[order.receiptStatus]}`}>
+                            {receiptLabel[order.receiptStatus]}
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-dark-300 text-sm">{order.orderContents || '—'}</td>
                     <td className="px-4 py-3 text-right text-dark-300 text-sm font-mono">
                       {order.orderSumUsd.toLocaleString('de-DE', { minimumFractionDigits: 2 })}
@@ -214,7 +273,8 @@ export default function OrdersPage() {
                         </button>
                         <button
                           onClick={() => {
-                            if (confirm(`Bestellung ${order.orderNumber} löschen?`)) {
+                            const label = order.internalNumber || order.orderNumber || order.id;
+                            if (confirm(`Bestellung ${label} löschen?`)) {
                               deleteMutation.mutate(order.id);
                             }
                           }}

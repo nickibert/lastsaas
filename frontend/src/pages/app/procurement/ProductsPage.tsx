@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Trash2, Pencil, Tag, X } from 'lucide-react';
+import { Plus, Search, Trash2, Pencil, Tag, X, SlidersHorizontal } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   productsApi, goodsGroupsApi, suppliersApi, productPriceListsApi,
@@ -229,6 +229,11 @@ export default function ProductsPage() {
   const enabled = !!activeTenant;
   const [search, setSearch] = useState('');
   const [supplierFilter, setSupplierFilter] = useState('');
+  const [goodsGroupFilter, setGoodsGroupFilter] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
+  const [attrKeyFilter, setAttrKeyFilter] = useState('');
+  const [attrValueFilter, setAttrValueFilter] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useLocalStorage<number>('table_page_size', 25);
   const [showForm, setShowForm] = useState(false);
@@ -240,8 +245,15 @@ export default function ProductsPage() {
   });
 
   const { data, isLoading } = useQuery({
-    queryKey: ['products', search, page, limit, supplierFilter],
-    queryFn: () => productsApi.list(search || undefined, page, limit, supplierFilter || undefined),
+    queryKey: ['products', search, page, limit, supplierFilter, goodsGroupFilter, tagFilter, attrKeyFilter, attrValueFilter],
+    queryFn: () => productsApi.list(
+      search || undefined, page, limit,
+      supplierFilter || undefined,
+      goodsGroupFilter || undefined,
+      tagFilter || undefined,
+      attrKeyFilter || undefined,
+      attrValueFilter || undefined,
+    ),
     enabled,
     throwOnError: false,
     placeholderData: prev => prev,
@@ -253,6 +265,7 @@ export default function ProductsPage() {
 
   const handleSearch = (q: string) => { setSearch(q); setPage(1); };
   const handleSupplierFilter = (id: string) => { setSupplierFilter(id); setPage(1); };
+  const activeFilterCount = [supplierFilter, goodsGroupFilter, tagFilter, attrKeyFilter].filter(Boolean).length;
 
   const { data: goodsGroupsData } = useQuery({ queryKey: ['goods-groups', 1, 500], queryFn: () => goodsGroupsApi.list(1, 500), enabled, throwOnError: false });
   const goodsGroups = goodsGroupsData?.items ?? [];
@@ -312,18 +325,69 @@ export default function ProductsPage() {
         </button>
       </div>
 
-      <div className="flex gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
-          <input type="text" placeholder="Name, Eigenname oder EAN suchen..." value={search}
-            onChange={e => handleSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white placeholder-dark-400 text-sm focus:outline-none focus:border-primary-500" />
+      <div className="space-y-2">
+        <div className="flex gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
+            <input type="text" placeholder="Name, Eigenname oder EAN suchen..." value={search}
+              onChange={e => handleSearch(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white placeholder-dark-400 text-sm focus:outline-none focus:border-primary-500" />
+          </div>
+          <button onClick={() => setShowFilters(!showFilters)}
+            className={`flex items-center gap-2 px-3 py-2 border rounded-lg text-sm transition-colors ${
+              showFilters || activeFilterCount > 0
+                ? 'bg-primary-500/20 border-primary-500/50 text-primary-400'
+                : 'bg-dark-800 border-dark-700 text-dark-400 hover:text-white'
+            }`}>
+            <SlidersHorizontal className="w-4 h-4" />
+            Filter{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+          </button>
         </div>
-        <select value={supplierFilter} onChange={e => handleSupplierFilter(e.target.value)}
-          className="px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm text-white focus:outline-none focus:border-primary-500">
-          <option value="">Alle Lieferanten</option>
-          {suppliers.map(s => <option key={s.id} value={s.id}>{s.company || `${s.firstname} ${s.lastname}`.trim()}</option>)}
-        </select>
+        {showFilters && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 bg-dark-800/30 border border-dark-700 rounded-xl">
+            <div>
+              <label className="block text-xs text-dark-400 mb-1">Lieferant</label>
+              <select value={supplierFilter} onChange={e => handleSupplierFilter(e.target.value)}
+                className="w-full px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-lg text-sm text-white focus:outline-none focus:border-primary-500">
+                <option value="">Alle</option>
+                {suppliers.map(s => <option key={s.id} value={s.id}>{s.company || `${s.firstname} ${s.lastname}`.trim()}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-dark-400 mb-1">Warengruppe</label>
+              <select value={goodsGroupFilter} onChange={e => { setGoodsGroupFilter(e.target.value); setPage(1); }}
+                className="w-full px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-lg text-sm text-white focus:outline-none focus:border-primary-500">
+                <option value="">Alle</option>
+                {goodsGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-dark-400 mb-1">Tag</label>
+              <input type="text" value={tagFilter} onChange={e => { setTagFilter(e.target.value); setPage(1); }}
+                placeholder="z.B. aktiv" className="w-full px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-lg text-sm text-white focus:outline-none focus:border-primary-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-dark-400 mb-1">Attribut Schlüssel</label>
+              <input type="text" value={attrKeyFilter} onChange={e => { setAttrKeyFilter(e.target.value); setPage(1); }}
+                placeholder="z.B. Farbe" className="w-full px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-lg text-sm text-white focus:outline-none focus:border-primary-500" />
+            </div>
+            {attrKeyFilter && (
+              <div>
+                <label className="block text-xs text-dark-400 mb-1">Attribut Wert</label>
+                <input type="text" value={attrValueFilter} onChange={e => { setAttrValueFilter(e.target.value); setPage(1); }}
+                  placeholder="z.B. Rot" className="w-full px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-lg text-sm text-white focus:outline-none focus:border-primary-500" />
+              </div>
+            )}
+            {activeFilterCount > 0 && (
+              <div className="flex items-end">
+                <button onClick={() => { setSupplierFilter(''); setGoodsGroupFilter(''); setTagFilter(''); setAttrKeyFilter(''); setAttrValueFilter(''); setPage(1); }}
+                  className="px-3 py-1.5 text-xs text-dark-400 hover:text-white bg-dark-700 rounded-lg">
+                  Filter zurücksetzen
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {showForm && (

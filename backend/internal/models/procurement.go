@@ -20,9 +20,36 @@ type Supplier struct {
 	Skype     string             `json:"skype" bson:"skype" validate:"omitempty,max=100"`
 	Origin    string             `json:"origin" bson:"origin" validate:"omitempty,max=50"`
 	Misc      string             `json:"misc" bson:"misc" validate:"omitempty,max=500"`
+	Tags      []string           `json:"tags,omitempty" bson:"tags,omitempty"`
 	LegacyID  int                `json:"legacyId,omitempty" bson:"legacyId,omitempty"`
 	CreatedAt time.Time          `json:"createdAt" bson:"createdAt"`
 	UpdatedAt time.Time          `json:"updatedAt" bson:"updatedAt"`
+}
+
+// ---------------------------------------------------------------------------
+// Customer
+// ---------------------------------------------------------------------------
+
+type CustomerAddress struct {
+	Street  string `json:"street,omitempty" bson:"street,omitempty" validate:"omitempty,max=200"`
+	City    string `json:"city,omitempty" bson:"city,omitempty" validate:"omitempty,max=100"`
+	Zip     string `json:"zip,omitempty" bson:"zip,omitempty" validate:"omitempty,max=20"`
+	Country string `json:"country,omitempty" bson:"country,omitempty" validate:"omitempty,max=100"`
+}
+
+type Customer struct {
+	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	TenantID    primitive.ObjectID `json:"tenantId" bson:"tenantId" validate:"required"`
+	Company     string             `json:"company" bson:"company" validate:"required,min=1,max=200"`
+	Firstname   string             `json:"firstname,omitempty" bson:"firstname,omitempty" validate:"omitempty,max=50"`
+	Lastname    string             `json:"lastname,omitempty" bson:"lastname,omitempty" validate:"omitempty,max=50"`
+	Email       string             `json:"email,omitempty" bson:"email,omitempty" validate:"omitempty,email,max=120"`
+	Phone       string             `json:"phone,omitempty" bson:"phone,omitempty" validate:"omitempty,max=50"`
+	Address     CustomerAddress    `json:"address,omitempty" bson:"address,omitempty"`
+	Misc        string             `json:"misc,omitempty" bson:"misc,omitempty" validate:"omitempty,max=1000"`
+	Tags        []string           `json:"tags,omitempty" bson:"tags,omitempty"`
+	CreatedAt   time.Time          `json:"createdAt" bson:"createdAt"`
+	UpdatedAt   time.Time          `json:"updatedAt" bson:"updatedAt"`
 }
 
 type SupplierCode struct {
@@ -273,24 +300,36 @@ type OrderFreight struct {
 	ZTN                         string  `json:"ztn" bson:"ztn" validate:"omitempty,max=12"` // Zolltarifnummer reference
 }
 
+// Order delivery/payment/warehouse statuses
+// DeliveryStatus: pending | ordered | shipped | arrived | partial
+// PaymentStatus:  unpaid | deposit_paid | fully_paid | overdue
+// ReceiptStatus:  pending | partial | received | distributed
+
 type Order struct {
-	ID                        primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
-	TenantID                  primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
-	SupplierID                *primitive.ObjectID `json:"supplierId,omitempty" bson:"supplierId,omitempty"`
-	OrderNumber               string              `json:"orderNumber" bson:"orderNumber" validate:"required,min=1,max=64"`
-	OrderDate                 time.Time           `json:"orderDate" bson:"orderDate" validate:"required"`
-	OrderContents             string              `json:"orderContents" bson:"orderContents" validate:"omitempty,max=255"`
-	Misc                      string              `json:"misc" bson:"misc"`
-	OrderSumUSD               float64             `json:"orderSumUsd" bson:"orderSumUsd" validate:"min=0"`
+	ID                         primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
+	TenantID                   primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
+	SupplierID                 *primitive.ObjectID `json:"supplierId,omitempty" bson:"supplierId,omitempty"`
+	CustomerID                 *primitive.ObjectID `json:"customerId,omitempty" bson:"customerId,omitempty"`
+	OrderNumber                string              `json:"orderNumber" bson:"orderNumber" validate:"omitempty,max=64"`
+	InternalNumber             string              `json:"internalNumber,omitempty" bson:"internalNumber,omitempty" validate:"omitempty,max=32"`
+	OrderDate                  time.Time           `json:"orderDate" bson:"orderDate" validate:"required"`
+	OrderContents              string              `json:"orderContents" bson:"orderContents" validate:"omitempty,max=255"`
+	Misc                       string              `json:"misc" bson:"misc"`
+	OrderSumUSD                float64             `json:"orderSumUsd" bson:"orderSumUsd" validate:"min=0"`
 	TransportInsurancePermille float64             `json:"transportInsurancePermille" bson:"transportInsurancePermille" validate:"min=0"`
-	Discount                  float64             `json:"discount" bson:"discount" validate:"min=0"`
-	PreDollarRate             float64             `json:"preDollarRate" bson:"preDollarRate" validate:"min=0"`
-	InvoiceFreightCarrierEUR  float64             `json:"invoiceFreightCarrierEur" bson:"invoiceFreightCarrierEur" validate:"min=0"`
-	Products                  []OrderProduct      `json:"products" bson:"products"`
-	Freight                   *OrderFreight       `json:"freight,omitempty" bson:"freight,omitempty"`
-	LegacyID                  int                 `json:"legacyId,omitempty" bson:"legacyId,omitempty"`
-	CreatedAt                 time.Time           `json:"createdAt" bson:"createdAt"`
-	UpdatedAt                 time.Time           `json:"updatedAt" bson:"updatedAt"`
+	Discount                   float64             `json:"discount" bson:"discount" validate:"min=0"`
+	PreDollarRate              float64             `json:"preDollarRate" bson:"preDollarRate" validate:"min=0"`
+	InvoiceFreightCarrierEUR   float64             `json:"invoiceFreightCarrierEur" bson:"invoiceFreightCarrierEur" validate:"min=0"`
+	// Status fields
+	DeliveryStatus string `json:"deliveryStatus,omitempty" bson:"deliveryStatus,omitempty" validate:"omitempty,oneof=pending ordered shipped arrived partial"`
+	PaymentStatus  string `json:"paymentStatus,omitempty" bson:"paymentStatus,omitempty" validate:"omitempty,oneof=unpaid deposit_paid fully_paid overdue"`
+	ReceiptStatus  string `json:"receiptStatus,omitempty" bson:"receiptStatus,omitempty" validate:"omitempty,oneof=pending partial received distributed"`
+	Tags           []string      `json:"tags,omitempty" bson:"tags,omitempty"`
+	Products       []OrderProduct `json:"products" bson:"products"`
+	Freight        *OrderFreight  `json:"freight,omitempty" bson:"freight,omitempty"`
+	LegacyID       int            `json:"legacyId,omitempty" bson:"legacyId,omitempty"`
+	CreatedAt      time.Time      `json:"createdAt" bson:"createdAt"`
+	UpdatedAt      time.Time      `json:"updatedAt" bson:"updatedAt"`
 }
 
 // ---------------------------------------------------------------------------
@@ -313,7 +352,10 @@ type OrderTask struct {
 	TenantID    primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
 	OrderID     primitive.ObjectID  `json:"orderId" bson:"orderId" validate:"required"`
 	AssigneeID  *primitive.ObjectID `json:"assigneeId,omitempty" bson:"assigneeId,omitempty"`
+	Title       string              `json:"title,omitempty" bson:"title,omitempty" validate:"omitempty,max=200"`
 	Text        string              `json:"text" bson:"text" validate:"required,min=1,max=500"`
+	Status      string              `json:"status,omitempty" bson:"status,omitempty" validate:"omitempty,oneof=open in_progress done"`
+	Priority    string              `json:"priority,omitempty" bson:"priority,omitempty" validate:"omitempty,oneof=low medium high"`
 	DueDate     *time.Time          `json:"dueDate,omitempty" bson:"dueDate,omitempty"`
 	DoneAt      *time.Time          `json:"doneAt,omitempty" bson:"doneAt,omitempty"`
 	DoneByID    *primitive.ObjectID `json:"doneById,omitempty" bson:"doneById,omitempty"`
@@ -327,20 +369,55 @@ type OrderTask struct {
 // ---------------------------------------------------------------------------
 
 type Offer struct {
-	ID             primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
-	TenantID       primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
-	ProductID      *primitive.ObjectID `json:"productId,omitempty" bson:"productId,omitempty"`
-	SupplierID     *primitive.ObjectID `json:"supplierId,omitempty" bson:"supplierId,omitempty"`
-	IsStockOffer   bool                `json:"isStockOffer" bson:"isStockOffer"`
-	NameShort      string              `json:"nameShort" bson:"nameShort" validate:"omitempty,max=100"`
-	Description    string              `json:"description" bson:"description"`
-	PriceUSD       float64             `json:"priceUsd" bson:"priceUsd" validate:"min=0"`
-	Quantity       int                 `json:"quantity" bson:"quantity" validate:"min=0"`
-	ValidUntil     *time.Time          `json:"validUntil,omitempty" bson:"validUntil,omitempty"`
-	Misc           string              `json:"misc" bson:"misc"`
-	LegacyID       int                 `json:"legacyId,omitempty" bson:"legacyId,omitempty"`
-	CreatedAt      time.Time           `json:"createdAt" bson:"createdAt"`
-	UpdatedAt      time.Time           `json:"updatedAt" bson:"updatedAt"`
+	ID           primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
+	TenantID     primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
+	ProductID    *primitive.ObjectID `json:"productId,omitempty" bson:"productId,omitempty"`
+	SupplierID   *primitive.ObjectID `json:"supplierId,omitempty" bson:"supplierId,omitempty"`
+	IsStockOffer bool                `json:"isStockOffer" bson:"isStockOffer"`
+	NameShort    string              `json:"nameShort" bson:"nameShort" validate:"omitempty,max=100"`
+	Description  string              `json:"description" bson:"description"`
+	PriceUSD     float64             `json:"priceUsd" bson:"priceUsd" validate:"min=0"`
+	Quantity     int                 `json:"quantity" bson:"quantity" validate:"min=0"`
+	ValidUntil   *time.Time          `json:"validUntil,omitempty" bson:"validUntil,omitempty"`
+	Misc         string              `json:"misc" bson:"misc"`
+	Tags         []string            `json:"tags,omitempty" bson:"tags,omitempty"`
+	LegacyID     int                 `json:"legacyId,omitempty" bson:"legacyId,omitempty"`
+	CreatedAt    time.Time           `json:"createdAt" bson:"createdAt"`
+	UpdatedAt    time.Time           `json:"updatedAt" bson:"updatedAt"`
+}
+
+// ---------------------------------------------------------------------------
+// Inventory / Stock
+// ---------------------------------------------------------------------------
+
+// StockMovement records a goods receipt (Wareneingang), issue (Warenausgang), or adjustment.
+// type: receipt | issue | adjustment
+type StockMovement struct {
+	ID          primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
+	TenantID    primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
+	ProductID   primitive.ObjectID  `json:"productId" bson:"productId" validate:"required"`
+	OrderID     *primitive.ObjectID `json:"orderId,omitempty" bson:"orderId,omitempty"`
+	CustomerID  *primitive.ObjectID `json:"customerId,omitempty" bson:"customerId,omitempty"`
+	Type        string              `json:"type" bson:"type" validate:"required,oneof=receipt issue adjustment"`
+	Quantity    float64             `json:"quantity" bson:"quantity" validate:"required"`
+	Unit        string              `json:"unit,omitempty" bson:"unit,omitempty" validate:"omitempty,max=20"`
+	Location    string              `json:"location,omitempty" bson:"location,omitempty" validate:"omitempty,max=100"`
+	Notes       string              `json:"notes,omitempty" bson:"notes,omitempty" validate:"omitempty,max=500"`
+	ProcessedBy primitive.ObjectID  `json:"processedBy" bson:"processedBy"`
+	MovedAt     time.Time           `json:"movedAt" bson:"movedAt"`
+	CreatedAt   time.Time           `json:"createdAt" bson:"createdAt"`
+	UpdatedAt   time.Time           `json:"updatedAt" bson:"updatedAt"`
+}
+
+// StockLevel is a cached/computed current stock level per product.
+type StockLevel struct {
+	ID        primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	TenantID  primitive.ObjectID `json:"tenantId" bson:"tenantId" validate:"required"`
+	ProductID primitive.ObjectID `json:"productId" bson:"productId" validate:"required"`
+	Quantity  float64            `json:"quantity" bson:"quantity"`
+	Unit      string             `json:"unit,omitempty" bson:"unit,omitempty" validate:"omitempty,max=20"`
+	Location  string             `json:"location,omitempty" bson:"location,omitempty" validate:"omitempty,max=100"`
+	UpdatedAt time.Time          `json:"updatedAt" bson:"updatedAt"`
 }
 
 // ---------------------------------------------------------------------------

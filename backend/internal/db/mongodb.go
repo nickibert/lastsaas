@@ -303,6 +303,27 @@ func (m *MongoDB) ensureIndexes() {
 				{Keys: bson.D{{Key: "parentId", Value: 1}}, Options: options.Index().SetSparse(true)},
 			},
 		},
+		{
+			"customers",
+			[]mongo.IndexModel{
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "company", Value: 1}}},
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "email", Value: 1}}, Options: options.Index().SetSparse(true)},
+			},
+		},
+		{
+			"stock_movements",
+			[]mongo.IndexModel{
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "productId", Value: 1}, {Key: "movedAt", Value: -1}}},
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "type", Value: 1}, {Key: "movedAt", Value: -1}}},
+				{Keys: bson.D{{Key: "orderId", Value: 1}}, Options: options.Index().SetSparse(true)},
+			},
+		},
+		{
+			"stock_levels",
+			[]mongo.IndexModel{
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "productId", Value: 1}}, Options: options.Index().SetUnique(true)},
+			},
+		},
 	}
 
 	// Collections where unique index failure is a data integrity risk
@@ -544,4 +565,16 @@ func (m *MongoDB) Offers() *mongo.Collection {
 
 func (m *MongoDB) ProcurementFiles() *mongo.Collection {
 	return m.Database.Collection("procurement_files")
+}
+
+func (m *MongoDB) Customers() *mongo.Collection {
+	return m.Database.Collection("customers")
+}
+
+func (m *MongoDB) StockMovements() *mongo.Collection {
+	return m.Database.Collection("stock_movements")
+}
+
+func (m *MongoDB) StockLevels() *mongo.Collection {
+	return m.Database.Collection("stock_levels")
 }

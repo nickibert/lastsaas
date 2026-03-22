@@ -34,6 +34,9 @@ func AllSchemas() []CollectionSchema {
 		orderTasksSchema(),
 		orderPaymentsSchema(),
 		offersSchema(),
+		customersSchema(),
+		stockMovementsSchema(),
+		stockLevelsSchema(),
 		tenantMembershipsSchema(),
 		invitationsSchema(),
 		plansSchema(),
@@ -857,14 +860,18 @@ func ordersSchema() CollectionSchema {
 		Schema: bson.M{
 			"$jsonSchema": bson.M{
 				"bsonType": "object",
-				"required": bson.A{"tenantId", "orderNumber", "orderDate", "createdAt", "updatedAt"},
+				"required": bson.A{"tenantId", "orderDate", "createdAt", "updatedAt"},
 				"properties": bson.M{
-					"tenantId":     bson.M{"bsonType": "objectId"},
-					"orderNumber":  bson.M{"bsonType": "string", "minLength": 1, "maxLength": 64},
-					"orderDate":    bson.M{"bsonType": "date"},
-					"orderSumUsd":  bson.M{"bsonType": "double", "minimum": 0},
-					"createdAt":    bson.M{"bsonType": "date"},
-					"updatedAt":    bson.M{"bsonType": "date"},
+					"tenantId":       bson.M{"bsonType": "objectId"},
+					"orderNumber":    bson.M{"bsonType": "string", "maxLength": 64},
+					"internalNumber": bson.M{"bsonType": "string", "maxLength": 32},
+					"orderDate":      bson.M{"bsonType": "date"},
+					"orderSumUsd":    bson.M{"bsonType": "double", "minimum": 0},
+					"deliveryStatus": bson.M{"bsonType": "string", "enum": bson.A{"pending", "ordered", "shipped", "arrived", "partial"}},
+					"paymentStatus":  bson.M{"bsonType": "string", "enum": bson.A{"unpaid", "deposit_paid", "fully_paid", "overdue"}},
+					"receiptStatus":  bson.M{"bsonType": "string", "enum": bson.A{"pending", "partial", "received", "distributed"}},
+					"createdAt":      bson.M{"bsonType": "date"},
+					"updatedAt":      bson.M{"bsonType": "date"},
 				},
 			},
 		},
@@ -882,6 +889,9 @@ func orderTasksSchema() CollectionSchema {
 					"tenantId":  bson.M{"bsonType": "objectId"},
 					"orderId":   bson.M{"bsonType": "objectId"},
 					"text":      bson.M{"bsonType": "string", "minLength": 1, "maxLength": 500},
+					"title":     bson.M{"bsonType": "string", "maxLength": 200},
+					"status":    bson.M{"bsonType": "string", "enum": bson.A{"open", "in_progress", "done"}},
+					"priority":  bson.M{"bsonType": "string", "enum": bson.A{"low", "medium", "high"}},
 					"createdAt": bson.M{"bsonType": "date"},
 					"updatedAt": bson.M{"bsonType": "date"},
 				},
@@ -922,6 +932,66 @@ func offersSchema() CollectionSchema {
 					"tenantId":  bson.M{"bsonType": "objectId"},
 					"priceUsd":  bson.M{"bsonType": "double", "minimum": 0},
 					"createdAt": bson.M{"bsonType": "date"},
+					"updatedAt": bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func customersSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "customers",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "company", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":  bson.M{"bsonType": "objectId"},
+					"company":   bson.M{"bsonType": "string", "minLength": 1, "maxLength": 200},
+					"email":     bson.M{"bsonType": "string", "maxLength": 120},
+					"phone":     bson.M{"bsonType": "string", "maxLength": 50},
+					"createdAt": bson.M{"bsonType": "date"},
+					"updatedAt": bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func stockMovementsSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "stock_movements",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "productId", "type", "quantity", "processedBy", "movedAt", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":    bson.M{"bsonType": "objectId"},
+					"productId":   bson.M{"bsonType": "objectId"},
+					"type":        bson.M{"bsonType": "string", "enum": bson.A{"receipt", "issue", "adjustment"}},
+					"quantity":    bson.M{"bsonType": "double"},
+					"processedBy": bson.M{"bsonType": "objectId"},
+					"movedAt":     bson.M{"bsonType": "date"},
+					"createdAt":   bson.M{"bsonType": "date"},
+					"updatedAt":   bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func stockLevelsSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "stock_levels",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "productId", "quantity", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":  bson.M{"bsonType": "objectId"},
+					"productId": bson.M{"bsonType": "objectId"},
+					"quantity":  bson.M{"bsonType": "double"},
 					"updatedAt": bson.M{"bsonType": "date"},
 				},
 			},

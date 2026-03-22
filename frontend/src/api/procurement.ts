@@ -13,7 +13,56 @@ export interface Supplier {
   skype: string;
   origin: string;
   misc: string;
+  tags?: string[];
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerAddress {
+  street?: string;
+  city?: string;
+  zip?: string;
+  country?: string;
+}
+
+export interface Customer {
+  id: string;
+  company: string;
+  firstname?: string;
+  lastname?: string;
+  email?: string;
+  phone?: string;
+  address?: CustomerAddress;
+  misc?: string;
+  tags?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type StockMovementType = 'receipt' | 'issue' | 'adjustment';
+
+export interface StockMovement {
+  id: string;
+  productId: string;
+  orderId?: string;
+  customerId?: string;
+  type: StockMovementType;
+  quantity: number;
+  unit?: string;
+  location?: string;
+  notes?: string;
+  processedBy: string;
+  movedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StockLevel {
+  id: string;
+  productId: string;
+  quantity: number;
+  unit?: string;
+  location?: string;
   updatedAt: string;
 }
 
@@ -211,10 +260,16 @@ export interface OrderPayment {
   updatedAt: string;
 }
 
+export type DeliveryStatus = 'pending' | 'ordered' | 'shipped' | 'arrived' | 'partial';
+export type PaymentStatus = 'unpaid' | 'deposit_paid' | 'fully_paid' | 'overdue';
+export type ReceiptStatus = 'pending' | 'partial' | 'received' | 'distributed';
+
 export interface Order {
   id: string;
   supplierId?: string;
-  orderNumber: string;
+  customerId?: string;
+  orderNumber?: string;
+  internalNumber?: string;
   orderDate: string;
   orderContents: string;
   misc: string;
@@ -223,16 +278,26 @@ export interface Order {
   discount: number;
   preDollarRate: number;
   invoiceFreightCarrierEur: number;
+  deliveryStatus?: DeliveryStatus;
+  paymentStatus?: PaymentStatus;
+  receiptStatus?: ReceiptStatus;
+  tags?: string[];
   products: OrderProduct[];
   freight?: OrderFreight;
   createdAt: string;
   updatedAt: string;
 }
 
+export type TaskStatus = 'open' | 'in_progress' | 'done';
+export type TaskPriority = 'low' | 'medium' | 'high';
+
 export interface OrderTask {
   id: string;
   orderId: string;
+  title?: string;
   text: string;
+  status?: TaskStatus;
+  priority?: TaskPriority;
   dueDate?: string;
   doneAt?: string;
   assigneeId?: string;
@@ -249,6 +314,7 @@ export interface Offer {
   quantity: number;
   validUntil?: string;
   misc: string;
+  tags?: string[];
   createdAt: string;
 }
 
@@ -299,7 +365,8 @@ export interface ProductsPage {
 
 // Products
 export const productsApi = {
-  list: (q?: string, page = 1, limit = 25, supplierId?: string) => api.get<ProductsPage>(`${BASE}/products`, { params: { q, page, limit, supplierId } }).then(r => r.data),
+  list: (q?: string, page = 1, limit = 25, supplierId?: string, goodsGroupId?: string, tag?: string, attrKey?: string, attrValue?: string) =>
+    api.get<ProductsPage>(`${BASE}/products`, { params: { q, page, limit, supplierId, goodsGroupId, tag, attrKey, attrValue } }).then(r => r.data),
   create: (data: Partial<Product>) => api.post<Product>(`${BASE}/products`, data).then(r => r.data),
   get: (id: string) => api.get<Product>(`${BASE}/products/${id}`).then(r => r.data),
   update: (id: string, data: Partial<Product>) => api.put(`${BASE}/products/${id}`, data),
@@ -403,4 +470,40 @@ export const offersApi = {
   get: (id: string) => api.get<Offer>(`${BASE}/offers/${id}`).then(r => r.data),
   update: (id: string, data: Partial<Offer>) => api.put(`${BASE}/offers/${id}`, data),
   delete: (id: string) => api.delete(`${BASE}/offers/${id}`),
+};
+
+export interface TaskTemplate {
+  id: string;
+  text: string;
+  daysAfter: number;
+  phase: 1 | 2; // 1=order placed, 2=shipped
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Task templates
+export const taskTemplatesApi = {
+  list: () => api.get<TaskTemplate[]>(`${BASE}/task-templates`).then(r => r.data),
+  create: (data: Partial<TaskTemplate>) => api.post<TaskTemplate>(`${BASE}/task-templates`, data).then(r => r.data),
+  update: (id: string, data: Partial<TaskTemplate>) => api.put(`${BASE}/task-templates/${id}`, data),
+  delete: (id: string) => api.delete(`${BASE}/task-templates/${id}`),
+};
+
+// Customers
+export const customersApi = {
+  list: (q?: string, page = 1, limit = 25) => api.get<PagedResult<Customer>>(`${BASE}/customers`, { params: { q, page, limit } }).then(r => r.data),
+  create: (data: Partial<Customer>) => api.post<Customer>(`${BASE}/customers`, data).then(r => r.data),
+  get: (id: string) => api.get<Customer>(`${BASE}/customers/${id}`).then(r => r.data),
+  update: (id: string, data: Partial<Customer>) => api.put(`${BASE}/customers/${id}`, data),
+  delete: (id: string) => api.delete(`${BASE}/customers/${id}`),
+};
+
+// Stock movements & levels
+export const stockApi = {
+  listMovements: (params?: { productId?: string; type?: StockMovementType; page?: number; limit?: number }) =>
+    api.get<PagedResult<StockMovement>>(`${BASE}/stock/movements`, { params }).then(r => r.data),
+  createMovement: (data: Partial<StockMovement>) => api.post<StockMovement>(`${BASE}/stock/movements`, data).then(r => r.data),
+  deleteMovement: (id: string) => api.delete(`${BASE}/stock/movements/${id}`),
+  listLevels: (params?: { productId?: string; nonZero?: boolean; page?: number; limit?: number }) =>
+    api.get<PagedResult<StockLevel>>(`${BASE}/stock/levels`, { params }).then(r => r.data),
 };
