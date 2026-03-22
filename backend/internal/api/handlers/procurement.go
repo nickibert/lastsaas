@@ -105,10 +105,15 @@ func (h *ProcurementHandler) RegisterRoutes(r *mux.Router, authMW mux.Middleware
 	s.HandleFunc("/products/{id}/ek-history", h.getEKHistory).Methods(http.MethodGet)
 	s.HandleFunc("/products/{id}/ek-history/chart", h.getEKHistoryChart).Methods(http.MethodGet)
 	s.HandleFunc("/products/{id}/inventory-lots", h.listInventoryLots).Methods(http.MethodGet)
+	s.HandleFunc("/products/{id}/inventory-valuation", h.getInventoryValuation).Methods(http.MethodGet)
 
 	// Inventory import / export
 	s.HandleFunc("/inventory/import", h.importInventoryLots).Methods(http.MethodPost)
 	s.HandleFunc("/inventory/export", h.exportInventoryValuation).Methods(http.MethodGet)
+
+	// Procurement tenant config
+	s.HandleFunc("/config", h.getProcurementConfig).Methods(http.MethodGet)
+	s.HandleFunc("/config", h.updateProcurementConfig).Methods(http.MethodPut)
 
 	// Calendar
 	s.HandleFunc("/calendar", h.getCalendar).Methods(http.MethodGet)
@@ -2843,4 +2848,175 @@ func (h *ProcurementHandler) listStockLevels(w http.ResponseWriter, r *http.Requ
 		"page":  page,
 		"pages": (total + limit - 1) / limit,
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Inventory valuation
+// ---------------------------------------------------------------------------
+
+type valuationResult struct {
+	UnitEkEUR    float64 `json:"unitEkEur"`
+	TotalValueEur float64 `json:"totalValueEur"`
+}
+
+type productInventoryValuation struct {
+	TotalQuantity int              `json:"totalQuantity"`
+	LastEK        float64          `json:"lastEk"`
+	LastEKDate    *time.Time       `json:"lastEkDate,omitempty"`
+	FIFO          valuationResult  `json:"fifo"`
+	LIFO          valuationResult  `json:"lifo"`
+	WeightedAvg   valuationResult  `json:"weightedAvg"`
+	EkDbMethode   string           `json:"ekDbMethode"`
+}
+
+// getInventoryValuation returns the current stock valuation for a product
+// using three methods (FIFO, LIFO, weighted average) plus the last EK.
+//
+// GET /products/:id/inventory-valuation
+func (h *ProcurementHandler) getInventoryValuation(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	productID, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	// Load product for LastEK
+	var product models.Product
+	if err := h.db.Products().FindOne(r.Context(), bson.M{"_id": productID, "tenantId": tenantID}).Decode(&product); err != nil {
+		http.Error(w, "product not found", http.StatusNotFound)
+		return
+	}
+
+	// Load all inventory lots sorted oldest-first (FIFO order)
+	cursor, err := h.db.InventoryLots().Find(r.Context(),
+		bson.M{"tenantId": tenantID, "productId": productID},
+		options.Find().SetSort(bson.D{{Key: "receivedAt", Value: 1}}))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	var lots []models.InventoryLot
+	cursor.All(r.Context(), &lots) //nolint
+
+	// Totals
+	totalRemaining := 0
+	totalOriginalQty := 0
+	totalOriginalValue := 0.0
+	for _, l := range lots {
+		totalRemaining += l.Remaining
+		totalOriginalQty += l.Quantity
+		totalOriginalValue += float64(l.Quantity) * l.UnitEkEUR
+	}
+
+	// FIFO: lot.Remaining already reflects FIFO consumption (oldest consumed first)
+	fifoValue := 0.0
+	for _, l := range lots {
+		fifoValue += float64(l.Remaining) * l.UnitEkEUR
+	}
+	fifoUnitEk := 0.0
+	if totalRemaining > 0 {
+		fifoUnitEk = math.Round(fifoValue/float64(totalRemaining)*10000) / 10000
+	}
+
+	// LIFO: oldest lots remain in stock (newest consumed first).
+	// Walk lots oldest→newest, fill up totalRemaining from the front.
+	lifoValue := 0.0
+	lifoToFill := totalRemaining
+	for _, l := range lots {
+		if lifoToFill <= 0 {
+			break
+		}
+		take := l.Quantity
+		if take > lifoToFill {
+			take = lifoToFill
+		}
+		lifoValue += float64(take) * l.UnitEkEUR
+		lifoToFill -= take
+	}
+	lifoUnitEk := 0.0
+	if totalRemaining > 0 {
+		lifoUnitEk = math.Round(lifoValue/float64(totalRemaining)*10000) / 10000
+	}
+
+	// Weighted average: average unit EK across all lots ever received,
+	// independent of what has been consumed.
+	wavgUnitEk := 0.0
+	if totalOriginalQty > 0 {
+		wavgUnitEk = math.Round(totalOriginalValue/float64(totalOriginalQty)*10000) / 10000
+	}
+	wavgValue := wavgUnitEk * float64(totalRemaining)
+
+	// Load tenant config to include active method in response
+	var cfg models.ProcurementTenantConfig
+	if err := h.db.ProcurementTenantConfigs().FindOne(r.Context(), bson.M{"tenantId": tenantID}).Decode(&cfg); err != nil {
+		cfg.EkDbMethode = "fifo" // default
+	}
+
+	writeJSON(w, http.StatusOK, productInventoryValuation{
+		TotalQuantity: totalRemaining,
+		LastEK:        product.LastEK,
+		LastEKDate:    product.LastEKDate,
+		FIFO:          valuationResult{UnitEkEUR: fifoUnitEk, TotalValueEur: math.Round(fifoValue*100) / 100},
+		LIFO:          valuationResult{UnitEkEUR: lifoUnitEk, TotalValueEur: math.Round(lifoValue*100) / 100},
+		WeightedAvg:   valuationResult{UnitEkEUR: wavgUnitEk, TotalValueEur: math.Round(wavgValue*100) / 100},
+		EkDbMethode:   cfg.EkDbMethode,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Procurement tenant config
+// ---------------------------------------------------------------------------
+
+// getProcurementConfig returns the procurement configuration for the current tenant.
+//
+// GET /procurement/config
+func (h *ProcurementHandler) getProcurementConfig(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var cfg models.ProcurementTenantConfig
+	if err := h.db.ProcurementTenantConfigs().FindOne(r.Context(), bson.M{"tenantId": tenantID}).Decode(&cfg); err != nil {
+		// Return defaults when no config document exists yet
+		cfg = models.ProcurementTenantConfig{TenantID: tenantID, EkDbMethode: "fifo"}
+	}
+	writeJSON(w, http.StatusOK, cfg)
+}
+
+// updateProcurementConfig updates the procurement configuration for the current tenant.
+//
+// PUT /procurement/config
+func (h *ProcurementHandler) updateProcurementConfig(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		EkDbMethode string `json:"ekDbMethode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	valid := map[string]bool{"last": true, "fifo": true, "lifo": true, "weighted_avg": true}
+	if !valid[req.EkDbMethode] {
+		http.Error(w, "invalid method: must be last, fifo, lifo, or weighted_avg", http.StatusBadRequest)
+		return
+	}
+	_, err := h.db.ProcurementTenantConfigs().UpdateOne(r.Context(),
+		bson.M{"tenantId": tenantID},
+		bson.M{"$set": bson.M{"ekDbMethode": req.EkDbMethode, "updatedAt": time.Now()}},
+		options.Update().SetUpsert(true))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ekDbMethode": req.EkDbMethode})
 }

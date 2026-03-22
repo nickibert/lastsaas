@@ -6,8 +6,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Trash2, Pencil, Tag, X, SlidersHorizontal, Download, History } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  productsApi, goodsGroupsApi, suppliersApi, productPriceListsApi, ekHistoryApi,
-  type Product, type ProductAttribute, type ProductPriceList, type EkChartPoint,
+  productsApi, goodsGroupsApi, suppliersApi, productPriceListsApi, ekHistoryApi, inventoryValuationApi,
+  type Product, type ProductAttribute, type ProductPriceList, type EkChartPoint, type ProductInventoryValuation, type EkDbMethode,
 } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
 import { Pagination } from '../../../components/Pagination';
@@ -15,7 +15,7 @@ import { Pagination } from '../../../components/Pagination';
 const inputCls = 'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm focus:outline-none focus:border-primary-500';
 const labelCls = 'block text-xs text-dark-400 mb-1';
 
-type FormTab = 'grunddaten' | 'tags' | 'preislisten' | 'ek-history';
+type FormTab = 'grunddaten' | 'tags' | 'preislisten' | 'ek-history' | 'bewertung';
 
 function TagInput({ tags, onChange }: { tags: string[]; onChange: (t: string[]) => void }) {
   const [input, setInput] = useState('');
@@ -228,6 +228,87 @@ function PriceListSection({ productId }: { productId: string }) {
 // ---------------------------------------------------------------------------
 // EK History section (per product)
 // ---------------------------------------------------------------------------
+const METHOD_LABELS: Record<EkDbMethode, string> = {
+  last: 'Letzter EK',
+  fifo: 'FIFO',
+  lifo: 'LIFO',
+  weighted_avg: 'Durchschnitt',
+};
+
+function InventoryValuationSection({ productId }: { productId: string }) {
+  const { data, isLoading } = useQuery<ProductInventoryValuation>({
+    queryKey: ['inventory-valuation', productId],
+    queryFn: () => inventoryValuationApi.get(productId),
+  });
+
+  if (isLoading) return <p className="text-dark-500 text-sm py-4">Lädt…</p>;
+  if (!data) return <p className="text-dark-500 text-sm py-4">Keine Lagerwertdaten vorhanden.</p>;
+
+  const activeMethod = data.ekDbMethode;
+
+  type Row = { key: EkDbMethode; label: string; unitEk: number; totalValue: number; isActive: boolean };
+  const rows: Row[] = [
+    { key: 'last',        label: 'Letzter EK',  unitEk: data.lastEk,             totalValue: data.lastEk * data.totalQuantity, isActive: activeMethod === 'last' },
+    { key: 'fifo',        label: 'FIFO',         unitEk: data.fifo.unitEkEur,     totalValue: data.fifo.totalValueEur,         isActive: activeMethod === 'fifo' },
+    { key: 'lifo',        label: 'LIFO',         unitEk: data.lifo.unitEkEur,     totalValue: data.lifo.totalValueEur,         isActive: activeMethod === 'lifo' },
+    { key: 'weighted_avg',label: 'Ø Durchschnitt',unitEk: data.weightedAvg.unitEkEur, totalValue: data.weightedAvg.totalValueEur, isActive: activeMethod === 'weighted_avg' },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm text-dark-400">
+            Lagerbestand: <span className="text-white font-medium">{data.totalQuantity} Stk.</span>
+            {data.lastEkDate && (
+              <span className="ml-3 text-dark-500 text-xs">Letzter EK: {data.lastEkDate.slice(0, 10)}</span>
+            )}
+          </p>
+        </div>
+        <a href="/procurement/config" className="text-xs text-dark-500 hover:text-primary-400">
+          DB-Methode ändern →
+        </a>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="border-b border-dark-700">
+            <tr>
+              <th className="text-left py-2 pr-4 text-dark-400 font-medium">Bewertungsmethode</th>
+              <th className="text-right py-2 pr-4 text-dark-400 font-medium">EK EUR/Stk.</th>
+              <th className="text-right py-2 text-dark-400 font-medium">Lagerwert EUR</th>
+              <th className="w-32 py-2 pl-4 text-dark-400 font-medium text-center">DB-Berechnung</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-dark-800/50">
+            {rows.map(row => (
+              <tr key={row.key} className={row.isActive ? 'bg-primary-500/10' : 'hover:bg-dark-800/20'}>
+                <td className="py-2.5 pr-4 font-medium text-white">{row.label}</td>
+                <td className="py-2.5 pr-4 text-right font-mono text-primary-300">
+                  {row.unitEk > 0 ? row.unitEk.toFixed(4) : '—'}
+                </td>
+                <td className="py-2.5 text-right font-mono text-dark-300">
+                  {row.totalValue > 0 ? row.totalValue.toFixed(2) : '—'}
+                </td>
+                <td className="py-2.5 pl-4 text-center">
+                  {row.isActive ? (
+                    <span className="px-2 py-0.5 rounded text-xs bg-primary-500/20 text-primary-300 font-medium">aktiv</span>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="text-xs text-dark-500">
+        Die für den Deckungsbeitrag aktive Methode ist <span className="text-dark-300 font-medium">{METHOD_LABELS[activeMethod]}</span>.
+        Änderbar unter <a href="/procurement/config" className="text-primary-400 hover:underline">Konfiguration</a>.
+      </p>
+    </div>
+  );
+}
+
 function EkHistorySection({ productId }: { productId: string }) {
   const { data: history = [] } = useQuery<EkChartPoint[]>({
     queryKey: ['ek-history-chart', productId],
@@ -505,6 +586,9 @@ export default function ProductsPage() {
                 <span className="flex items-center gap-1.5"><History className="w-3.5 h-3.5" />EK-Historie</span>
               </button>
             )}
+            {editing && (
+              <button className={tabCls('bewertung')} onClick={() => setTab('bewertung')}>Lagerbewertung</button>
+            )}
           </div>
 
           <div className="p-6 space-y-4">
@@ -574,7 +658,11 @@ export default function ProductsPage() {
               <EkHistorySection productId={editing.id} />
             )}
 
-            {tab !== 'preislisten' && tab !== 'ek-history' && (
+            {tab === 'bewertung' && editing && (
+              <InventoryValuationSection productId={editing.id} />
+            )}
+
+            {tab !== 'preislisten' && tab !== 'ek-history' && tab !== 'bewertung' && (
               <div className="flex gap-3 pt-2">
                 <button onClick={submit} disabled={!form.nameShort || createMutation.isPending || updateMutation.isPending}
                   className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50 text-sm">
@@ -584,7 +672,7 @@ export default function ProductsPage() {
                   className="px-4 py-2 bg-dark-700 text-white rounded-lg hover:bg-dark-600 text-sm">Abbrechen</button>
               </div>
             )}
-            {(tab === 'preislisten' || tab === 'ek-history') && (
+            {(tab === 'preislisten' || tab === 'ek-history' || tab === 'bewertung') && (
               <div className="flex gap-3 pt-2 border-t border-dark-700">
                 <button onClick={() => { setShowForm(false); setEditing(null); resetForm(); }}
                   className="px-4 py-2 bg-dark-700 text-white rounded-lg hover:bg-dark-600 text-sm">Schließen</button>

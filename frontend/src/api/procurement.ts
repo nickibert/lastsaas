@@ -198,6 +198,27 @@ export interface EkChartPoint {
   source: string;
 }
 
+export type EkDbMethode = 'last' | 'fifo' | 'lifo' | 'weighted_avg';
+
+export interface ValuationResult {
+  unitEkEur: number;
+  totalValueEur: number;
+}
+
+export interface ProductInventoryValuation {
+  totalQuantity: number;
+  lastEk: number;
+  lastEkDate?: string;
+  fifo: ValuationResult;
+  lifo: ValuationResult;
+  weightedAvg: ValuationResult;
+  ekDbMethode: EkDbMethode;
+}
+
+export interface ProcurementConfig {
+  ekDbMethode: EkDbMethode;
+}
+
 export interface CalendarTask {
   id: string;
   orderId: string;
@@ -518,6 +539,16 @@ export const inventoryLotsApi = {
   },
   exportUrl: (method: 'fifo' | 'lifo' | 'weighted_avg' = 'fifo') =>
     `${BASE}/inventory/export?method=${method}`,
+};
+
+export const inventoryValuationApi = {
+  get: (productId: string) =>
+    api.get<ProductInventoryValuation>(`${BASE}/products/${productId}/inventory-valuation`).then(r => r.data),
+};
+
+export const procurementConfigApi = {
+  get: () => api.get<ProcurementConfig>(`${BASE}/config`).then(r => r.data),
+  update: (data: Partial<ProcurementConfig>) => api.put<ProcurementConfig>(`${BASE}/config`, data).then(r => r.data),
 };
 
 // Offers

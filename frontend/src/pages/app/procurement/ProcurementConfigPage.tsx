@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, Pencil, Settings, ClipboardList } from 'lucide-react';
+import { Plus, Trash2, Pencil, Settings, ClipboardList, BarChart2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { taskTemplatesApi, type TaskTemplate } from '../../../api/procurement';
+import { taskTemplatesApi, procurementConfigApi, type TaskTemplate, type EkDbMethode } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
 
 const inputCls = 'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm focus:outline-none focus:border-primary-500';
@@ -158,6 +158,75 @@ function TaskTemplateSection() {
   );
 }
 
+const EK_METHOD_OPTIONS: { value: EkDbMethode; label: string; description: string }[] = [
+  { value: 'last',        label: 'Letzter EK',        description: 'Zuletzt gespeicherter EK-Preis des Artikels (Product.LastEK)' },
+  { value: 'fifo',        label: 'FIFO',               description: 'First In, First Out – älteste Wareneingänge gelten als zuerst verbraucht' },
+  { value: 'lifo',        label: 'LIFO',               description: 'Last In, First Out – neueste Wareneingänge gelten als zuerst verbraucht' },
+  { value: 'weighted_avg',label: 'Ø Durchschnitt',     description: 'Gewogener Durchschnitt über alle jemals eingegangenen Lose' },
+];
+
+function EkMethodSection() {
+  const qc = useQueryClient();
+  const { activeTenant } = useTenant();
+  const enabled = !!activeTenant;
+
+  const { data: cfg, isLoading } = useQuery({
+    queryKey: ['procurement-config'],
+    queryFn: procurementConfigApi.get,
+    enabled,
+    throwOnError: false,
+  });
+
+  const updateMut = useMutation({
+    mutationFn: (method: EkDbMethode) => procurementConfigApi.update({ ekDbMethode: method }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['procurement-config'] }); toast.success('Einstellung gespeichert'); },
+    onError: () => toast.error('Fehler beim Speichern'),
+  });
+
+  const active = cfg?.ekDbMethode ?? 'fifo';
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <BarChart2 className="w-5 h-5 text-primary-400" />
+        <h2 className="text-lg font-semibold text-white">EK-Methode für Deckungsbeitrag</h2>
+      </div>
+      <p className="text-sm text-dark-400">
+        Legt fest, welcher Einstandspreis für die Deckungsbeitragsberechnung herangezogen wird.
+        Im Artikel-Tab "Lagerbewertung" werden alle Methoden zum Vergleich angezeigt.
+      </p>
+
+      {isLoading ? (
+        <div className="text-dark-400 text-sm">Lädt…</div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {EK_METHOD_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => { if (opt.value !== active) updateMut.mutate(opt.value); }}
+              disabled={updateMut.isPending}
+              className={`text-left px-4 py-3 rounded-lg border transition-colors ${
+                opt.value === active
+                  ? 'border-primary-500 bg-primary-500/10 text-white'
+                  : 'border-dark-700 bg-dark-800/50 text-dark-300 hover:border-dark-600 hover:text-white'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className={`w-3 h-3 rounded-full border-2 flex-shrink-0 ${opt.value === active ? 'border-primary-400 bg-primary-400' : 'border-dark-500'}`} />
+                <span className="font-medium text-sm">{opt.label}</span>
+                {opt.value === active && (
+                  <span className="ml-auto text-xs px-1.5 py-0.5 rounded bg-primary-500/20 text-primary-300">aktiv</span>
+                )}
+              </div>
+              <p className="text-xs text-dark-500 mt-1 ml-5">{opt.description}</p>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ProcurementConfigPage() {
   return (
     <div className="space-y-8">
@@ -169,6 +238,7 @@ export default function ProcurementConfigPage() {
         </div>
       </div>
 
+      <EkMethodSection />
       <TaskTemplateSection />
     </div>
   );

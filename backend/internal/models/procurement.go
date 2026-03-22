@@ -153,6 +153,24 @@ type ProductPriceList struct {
 }
 
 // ---------------------------------------------------------------------------
+// Procurement tenant config
+// ---------------------------------------------------------------------------
+
+// ProcurementTenantConfig holds per-tenant procurement settings.
+// EkDbMethode selects which EK value is used for Deckungsbeitrag calculations:
+//
+//	"last"         → Product.LastEK
+//	"fifo"         → FIFO-based unit EK from inventory lots
+//	"lifo"         → LIFO-based unit EK from inventory lots
+//	"weighted_avg" → weighted-average EK across all lots ever received
+type ProcurementTenantConfig struct {
+	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	TenantID    primitive.ObjectID `json:"tenantId" bson:"tenantId"`
+	EkDbMethode string             `json:"ekDbMethode" bson:"ekDbMethode"` // "last"|"fifo"|"lifo"|"weighted_avg"
+	UpdatedAt   time.Time          `json:"updatedAt" bson:"updatedAt"`
+}
+
+// ---------------------------------------------------------------------------
 // Inventory Lots (FIFO / LIFO / Weighted-Average valuation)
 // ---------------------------------------------------------------------------
 

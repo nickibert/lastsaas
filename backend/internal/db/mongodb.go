@@ -547,6 +547,10 @@ func (m *MongoDB) InventoryLots() *mongo.Collection {
 	return m.Database.Collection("inventory_lots")
 }
 
+func (m *MongoDB) ProcurementTenantConfigs() *mongo.Collection {
+	return m.Database.Collection("procurement_tenant_configs")
+}
+
 func (m *MongoDB) CalendarEntries() *mongo.Collection {
 	return m.Database.Collection("calendar_entries")
 }
