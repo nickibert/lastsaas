@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link2, CheckCircle, XCircle, RefreshCw, Settings2, Clock, AlertCircle, Building2, Download } from 'lucide-react';
+import { Link2, CheckCircle, XCircle, RefreshCw, Settings2, Clock, AlertCircle, Building2, Download, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { xentralApi, type XentralConfig, type XentralSyncLog, type XentralInstanceInfo } from '../../../api/xentral';
 import { useTenant } from '../../../contexts/TenantContext';
@@ -52,6 +52,7 @@ export default function XentralPage() {
   const [editingToken, setEditingToken] = useState(false);
   const [testing, setTesting] = useState(false);
   const [liveInstanceInfo, setLiveInstanceInfo] = useState<XentralInstanceInfo | null>(null);
+  const [copiedToken, setCopiedToken] = useState(false);
   const [syncingEntity, setSyncingEntity] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
   const [importingAccount, setImportingAccount] = useState(false);
@@ -199,6 +200,34 @@ export default function XentralPage() {
             )}
           </div>
         </div>
+
+        {/* Webhook URL — shown once a webhookToken exists (after first save) */}
+        {cfg?.webhookToken && (() => {
+          const webhookUrl = `${window.location.origin}/api/procurement/integrations/xentral/webhook/${cfg.webhookToken}`;
+          return (
+            <div>
+              <label className={labelCls}>Webhook-URL (für Xentral)</label>
+              <div className="flex items-center gap-2">
+                <span className="flex-1 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-dark-400 text-xs font-mono truncate select-all">
+                  {webhookUrl}
+                </span>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(webhookUrl);
+                    setCopiedToken(true);
+                    setTimeout(() => setCopiedToken(false), 2000);
+                  }}
+                  title="Kopieren"
+                  className="px-3 py-2 bg-dark-700 text-dark-300 rounded-lg hover:bg-dark-600 text-sm flex items-center gap-1.5">
+                  {copiedToken ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-dark-500">
+                Trage diese URL in Xentral als Webhook ein, damit Änderungen in Echtzeit übertragen werden.
+              </p>
+            </div>
+          );
+        })()}
 
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 cursor-pointer">

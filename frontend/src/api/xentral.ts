@@ -56,6 +56,7 @@ export interface XentralConfig {
   lastSyncCustomers?: string;
   lastSyncSuppliers?: string;
   lastSyncOrders?: string;
+  webhookToken?: string;
   updatedAt?: string;
 }
 

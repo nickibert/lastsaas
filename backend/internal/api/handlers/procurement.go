@@ -15,6 +15,7 @@ import (
 	"lastsaas/internal/middleware"
 	"lastsaas/internal/models"
 	"lastsaas/internal/syslog"
+	"lastsaas/internal/xentral"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -24,9 +25,10 @@ import (
 )
 
 type ProcurementHandler struct {
-	db             *db.MongoDB
-	syslog         *syslog.Logger
-	tenantMW       *middleware.TenantMiddleware
+	db       *db.MongoDB
+	syslog   *syslog.Logger
+	tenantMW *middleware.TenantMiddleware
+	xentral  *xentral.Engine
 }
 
 func NewProcurementHandler(database *db.MongoDB, sysLogger *syslog.Logger) *ProcurementHandler {
@@ -34,7 +36,27 @@ func NewProcurementHandler(database *db.MongoDB, sysLogger *syslog.Logger) *Proc
 		db:       database,
 		syslog:   sysLogger,
 		tenantMW: middleware.NewTenantMiddleware(database),
+		xentral:  xentral.NewEngine(database),
 	}
+}
+
+// maybePushOrder fires a real-time push of an order to Xentral in a goroutine.
+// It is a no-op when the tenant has PushOrdersToXentral disabled or unconfigured.
+func (h *ProcurementHandler) maybePushOrder(tenantID, orderID primitive.ObjectID) {
+	go func() {
+		ctx := context.Background()
+		var cfg models.XentralConfig
+		if err := h.db.XentralConfigs().FindOne(ctx, bson.M{"tenantId": tenantID}).Decode(&cfg); err != nil {
+			return
+		}
+		if !cfg.Enabled || !cfg.PushOrdersToXentral || cfg.BaseURL == "" || cfg.APIToken == "" {
+			return
+		}
+		client := xentral.NewClient(cfg.BaseURL, cfg.APIToken)
+		if _, err := h.xentral.PushOrderToXentral(ctx, tenantID, orderID, client); err != nil {
+			h.syslog.Log(ctx, "medium", "xentral order push failed: "+err.Error())
+		}
+	}()
 }
 
 // RegisterRoutes wires all procurement endpoints onto the given router.
@@ -1122,6 +1144,7 @@ func (h *ProcurementHandler) createOrder(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
+	h.maybePushOrder(tenantID, doc.ID)
 	writeJSON(w, http.StatusCreated, doc)
 }
 
@@ -1169,6 +1192,7 @@ func (h *ProcurementHandler) updateOrder(w http.ResponseWriter, r *http.Request)
 	doc.UpdatedAt = time.Now().UTC()
 	h.db.Orders().UpdateOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID},
 		bson.M{"$set": doc}) //nolint
+	h.maybePushOrder(tenantID, id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
