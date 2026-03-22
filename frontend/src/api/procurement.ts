@@ -283,7 +283,7 @@ export interface Order {
   receiptStatus?: ReceiptStatus;
   tags?: string[];
   products: OrderProduct[];
-  freight?: OrderFreight;
+  freights?: OrderFreight[];
   createdAt: string;
   updatedAt: string;
 }
@@ -428,18 +428,20 @@ export const calendarEntriesApi = {
 };
 
 // Orders
+const normDate = (v: string | undefined) => v ? (v.includes('T') ? v : v + 'T00:00:00Z') : undefined;
+
 const normalizeOrderDates = (data: Partial<Order>): Partial<Order> => {
   const p = { ...data };
   if (p.orderDate && !p.orderDate.includes('T')) p.orderDate = p.orderDate + 'T00:00:00Z';
-  if (p.freight) {
-    const f = { ...p.freight };
-    const normDate = (v: string | undefined) => v ? (v.includes('T') ? v : v + 'T00:00:00Z') : undefined;
-    f.shippingDate = normDate(f.shippingDate);
-    f.estimatedArrival = normDate(f.estimatedArrival);
-    f.arrival = normDate(f.arrival);
-    f.avisShipperDate = normDate(f.avisShipperDate);
-    f.docOfOrigin = normDate(f.docOfOrigin);
-    p.freight = f;
+  if (p.freights) {
+    p.freights = p.freights.map(f => ({
+      ...f,
+      shippingDate: normDate(f.shippingDate),
+      estimatedArrival: normDate(f.estimatedArrival),
+      arrival: normDate(f.arrival),
+      avisShipperDate: normDate(f.avisShipperDate),
+      docOfOrigin: normDate(f.docOfOrigin),
+    }));
   }
   return p;
 };
@@ -450,8 +452,8 @@ export const ordersApi = {
   create: (data: Partial<Order>) => api.post<Order>(`${BASE}/orders`, normalizeOrderDates(data)).then(r => r.data),
   get: (id: string) => api.get<Order>(`${BASE}/orders/${id}`).then(r => r.data),
   update: (id: string, data: Partial<Order>) => api.put(`${BASE}/orders/${id}`, normalizeOrderDates(data)),
-  patchFreightDate: (id: string, field: string, date: string) =>
-    api.patch(`${BASE}/orders/${id}/freight-date`, { field, date: date === '' ? '' : (date.includes('T') ? date : date + 'T00:00:00Z') }),
+  patchFreightDate: (id: string, index: number, field: string, date: string) =>
+    api.patch(`${BASE}/orders/${id}/freight-date`, { index, field, date: date === '' ? '' : (date.includes('T') ? date : date + 'T00:00:00Z') }),
   delete: (id: string) => api.delete(`${BASE}/orders/${id}`),
   listTasks: (id: string) => api.get<OrderTask[]>(`${BASE}/orders/${id}/tasks`).then(r => r.data),
   createTask: (id: string, data: Partial<OrderTask>) => api.post<OrderTask>(`${BASE}/orders/${id}/tasks`, data).then(r => r.data),

@@ -325,9 +325,10 @@ type Order struct {
 	PaymentStatus  string `json:"paymentStatus,omitempty" bson:"paymentStatus,omitempty" validate:"omitempty,oneof=unpaid deposit_paid fully_paid overdue"`
 	ReceiptStatus  string `json:"receiptStatus,omitempty" bson:"receiptStatus,omitempty" validate:"omitempty,oneof=pending partial received distributed"`
 	Tags           []string      `json:"tags,omitempty" bson:"tags,omitempty"`
-	Products       []OrderProduct `json:"products" bson:"products"`
-	Freight        *OrderFreight  `json:"freight,omitempty" bson:"freight,omitempty"`
-	LegacyID       int            `json:"legacyId,omitempty" bson:"legacyId,omitempty"`
+	Products  []OrderProduct `json:"products" bson:"products"`
+	Freights  []OrderFreight `json:"freights,omitempty" bson:"freights,omitempty"`
+	Freight   *OrderFreight  `json:"-" bson:"freight,omitempty"` // legacy single-freight field — migrated on read
+	LegacyID  int            `json:"legacyId,omitempty" bson:"legacyId,omitempty"`
 	CreatedAt      time.Time      `json:"createdAt" bson:"createdAt"`
 	UpdatedAt      time.Time      `json:"updatedAt" bson:"updatedAt"`
 }

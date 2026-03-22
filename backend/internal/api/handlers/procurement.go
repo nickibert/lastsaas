@@ -1122,6 +1122,10 @@ func (h *ProcurementHandler) getOrder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	// Migrate legacy single-freight field to freights array on first read
+	if len(doc.Freights) == 0 && doc.Freight != nil {
+		doc.Freights = []models.OrderFreight{*doc.Freight}
+	}
 	writeJSON(w, http.StatusOK, doc)
 }
 
@@ -1163,6 +1167,7 @@ func (h *ProcurementHandler) patchOrderFreightDate(w http.ResponseWriter, r *htt
 	var body struct {
 		Field string `json:"field"`
 		Date  string `json:"date"`  // RFC3339 to set, empty string to clear
+		Index int    `json:"index"` // index into freights array
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
@@ -1176,12 +1181,12 @@ func (h *ProcurementHandler) patchOrderFreightDate(w http.ResponseWriter, r *htt
 		http.Error(w, "invalid field", http.StatusBadRequest)
 		return
 	}
+	fieldPath := "freights." + strconv.Itoa(body.Index) + "." + body.Field
 	if body.Date == "" {
-		// Clear the field
 		h.db.Orders().UpdateOne(r.Context(),
 			bson.M{"_id": id, "tenantId": tenantID},
 			bson.M{
-				"$unset": bson.M{"freight." + body.Field: ""},
+				"$unset": bson.M{fieldPath: ""},
 				"$set":   bson.M{"updatedAt": time.Now().UTC()},
 			}) //nolint
 	} else {
@@ -1193,8 +1198,8 @@ func (h *ProcurementHandler) patchOrderFreightDate(w http.ResponseWriter, r *htt
 		h.db.Orders().UpdateOne(r.Context(),
 			bson.M{"_id": id, "tenantId": tenantID},
 			bson.M{"$set": bson.M{
-				"freight." + body.Field: t,
-				"updatedAt":             time.Now().UTC(),
+				fieldPath:   t,
+				"updatedAt": time.Now().UTC(),
 			}}) //nolint
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -1558,10 +1563,14 @@ func (h *ProcurementHandler) applyOrderEK(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// --- Total freight EUR (all costs allocated by volume) ---
+	// Migrate legacy single-freight if needed
+	if len(order.Freights) == 0 && order.Freight != nil {
+		order.Freights = []models.OrderFreight{*order.Freight}
+	}
+
+	// --- Total freight EUR (sum over all containers) ---
 	totalFreightEUR := 0.0
-	if order.Freight != nil {
-		f := order.Freight
+	for _, f := range order.Freights {
 		fRate := f.DollarRate
 		if fRate <= 0 {
 			fRate = dollarRateAvg
@@ -1575,7 +1584,7 @@ func (h *ProcurementHandler) applyOrderEK(w http.ResponseWriter, r *http.Request
 			f.PeakSeasonSurchargeUSD +
 			f.SuezCanalAddonUSD +
 			f.DangerPayUSD
-		totalFreightEUR = freightageEUR +
+		totalFreightEUR += freightageEUR +
 			totalSeaUSD*fRate +
 			f.THCEUR +
 			f.ISPSEUR +
@@ -1815,10 +1824,12 @@ func (h *ProcurementHandler) getCalendar(w http.ResponseWriter, r *http.Request)
 		orderIDSet[t.OrderID] = struct{}{}
 	}
 
-	// Fetch orders with estimatedArrival or arrival in range (nested in freight)
+	// Fetch orders with estimatedArrival or arrival in range (freights array or legacy freight)
 	arrivalCursor, err := h.db.Orders().Find(r.Context(), bson.M{
 		"tenantId": tenantID,
 		"$or": bson.A{
+			bson.M{"freights.estimatedArrival": bson.M{"$gte": from, "$lt": to}},
+			bson.M{"freights.arrival": bson.M{"$gte": from, "$lt": to}},
 			bson.M{"freight.estimatedArrival": bson.M{"$gte": from, "$lt": to}},
 			bson.M{"freight.arrival": bson.M{"$gte": from, "$lt": to}},
 		},
@@ -1890,25 +1901,35 @@ func (h *ProcurementHandler) getCalendar(w http.ResponseWriter, r *http.Request)
 		tasks = append(tasks, ct)
 	}
 
-	// Build response arrivals
+	// Build response arrivals — one entry per container per order
 	arrivals := make([]calendarArrival, 0, len(arrivalOrders))
 	for _, o := range arrivalOrders {
-		ca := calendarArrival{
-			OrderID:     o.ID.Hex(),
-			OrderNumber: o.OrderNumber,
+		// Migrate legacy single freight
+		freights := o.Freights
+		if len(freights) == 0 && o.Freight != nil {
+			freights = []models.OrderFreight{*o.Freight}
 		}
-		if o.Freight != nil {
-			if o.Freight.EstimatedArrival != nil {
-				ca.EstimatedDate = o.Freight.EstimatedArrival.Format("2006-01-02")
-			}
-			if o.Freight.Arrival != nil {
-				ca.ActualDate = o.Freight.Arrival.Format("2006-01-02")
-			}
-		}
+		supplierName := ""
 		if o.SupplierID != nil {
-			ca.SupplierName = supplierMap[*o.SupplierID]
+			supplierName = supplierMap[*o.SupplierID]
 		}
-		arrivals = append(arrivals, ca)
+		for _, f := range freights {
+			if f.EstimatedArrival == nil && f.Arrival == nil {
+				continue
+			}
+			ca := calendarArrival{
+				OrderID:      o.ID.Hex(),
+				OrderNumber:  o.OrderNumber,
+				SupplierName: supplierName,
+			}
+			if f.EstimatedArrival != nil {
+				ca.EstimatedDate = f.EstimatedArrival.Format("2006-01-02")
+			}
+			if f.Arrival != nil {
+				ca.ActualDate = f.Arrival.Format("2006-01-02")
+			}
+			arrivals = append(arrivals, ca)
+		}
 	}
 
 	// Fetch manual calendar entries for range

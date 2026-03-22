@@ -235,12 +235,27 @@ export default function OrderDetailPage() {
     },
   });
 
-  // Freight helper
-  const freight: Partial<OrderFreight> = (draft.freight as OrderFreight) ?? {};
-  const setFreight = (key: keyof OrderFreight, value: unknown) => setDraft(d => ({ ...d, freight: { ...((d.freight ?? {}) as OrderFreight), [key]: value } }));
+  // Freights array helpers (supports n containers per order)
+  const emptyFreight = (): OrderFreight => ({
+    containerId: '', harbourIdFrom: '', harbourIdTo: '', freightCarrierId: '',
+    containerNr: '', docOfOriginChecked: false, docOfOriginSigned: false, docOfOriginShipped: false,
+    seaFreightUsd: 0, emergencyBunkerSurchargeUsd: 0, peakSeasonSurchargeUsd: 0,
+    suezCanalAddonUsd: 0, dangerPayUsd: 0, dollarRate: 0, freightageEur: 0,
+    preFreightageEur: 0, thcEur: 0, ispsEur: 0, blDocFeeEur: 0, followUpFeesEur: 0,
+    customsClearanceEur: 0, customsEur: 0, customsPercent: 0, ztn: '',
+  });
+  const orderFreights: OrderFreight[] = (draft.freights as OrderFreight[]) ?? [];
+  const addFreight = () => setDraft(d => ({ ...d, freights: [...(d.freights ?? []), emptyFreight()] }));
+  const removeFreight = (idx: number) => setDraft(d => ({ ...d, freights: ((d.freights ?? []) as OrderFreight[]).filter((_, i) => i !== idx) }));
+  const setFreightField = (idx: number, key: keyof OrderFreight, value: unknown) =>
+    setDraft(d => {
+      const arr = [...((d.freights ?? []) as OrderFreight[])];
+      arr[idx] = { ...arr[idx], [key]: value };
+      return { ...d, freights: arr };
+    });
 
   // Warenbezugskosten-Kalkulation (live, based on current draft values)
-  // Matches legacy get_wbk() formula exactly.
+  // Matches legacy get_wbk() formula exactly — sums over all containers.
   const calcEK = (() => {
     const orderSumUSD = draft.orderSumUsd ?? 0;
     const discount = draft.discount ?? 0;
@@ -257,15 +272,18 @@ export default function OrderDetailPage() {
     const warenwertUSD = orderSumUSD - discount;
     const warenwertEUR = dollarRateAvg > 0 ? warenwertUSD / dollarRateAvg : 0;
 
-    // Freight costs
-    const f = draft.freight as Partial<OrderFreight> | undefined;
-    const fRate = (f?.dollarRate ?? 0) > 0 ? (f?.dollarRate ?? 0) : dollarRateAvg;
-    const totalSeaUSD = (f?.seaFreightUsd ?? 0) + (f?.emergencyBunkerSurchargeUsd ?? 0) +
-      (f?.peakSeasonSurchargeUsd ?? 0) + (f?.suezCanalAddonUsd ?? 0) + (f?.dangerPayUsd ?? 0);
-    const seaFreightEUR = fRate > 0 ? totalSeaUSD / fRate : 0;
-    const freightageEUR = (f?.freightageEur ?? 0) > 0 ? (f?.freightageEur ?? 0) : (f?.preFreightageEur ?? 0);
-    const portFeesEUR = (f?.thcEur ?? 0) + (f?.ispsEur ?? 0) + (f?.blDocFeeEur ?? 0) + (f?.followUpFeesEur ?? 0);
-    const customsEUR = (f?.customsClearanceEur ?? 0) + (f?.customsEur ?? 0);
+    // Sum freight costs across all containers
+    let totalSeaUSD = 0, seaFreightEUR = 0, freightageEUR = 0, portFeesEUR = 0, customsEUR = 0;
+    for (const f of orderFreights) {
+      const fRate = (f.dollarRate ?? 0) > 0 ? (f.dollarRate ?? 0) : dollarRateAvg;
+      const seaUSD = (f.seaFreightUsd ?? 0) + (f.emergencyBunkerSurchargeUsd ?? 0) +
+        (f.peakSeasonSurchargeUsd ?? 0) + (f.suezCanalAddonUsd ?? 0) + (f.dangerPayUsd ?? 0);
+      totalSeaUSD += seaUSD;
+      seaFreightEUR += fRate > 0 ? seaUSD / fRate : 0;
+      freightageEUR += (f.freightageEur ?? 0) > 0 ? (f.freightageEur ?? 0) : (f.preFreightageEur ?? 0);
+      portFeesEUR += (f.thcEur ?? 0) + (f.ispsEur ?? 0) + (f.blDocFeeEur ?? 0) + (f.followUpFeesEur ?? 0);
+      customsEUR += (f.customsClearanceEur ?? 0) + (f.customsEur ?? 0);
+    }
     const totalFreightEUR = freightageEUR + seaFreightEUR + portFeesEUR + customsEUR;
 
     const permille = draft.transportInsurancePermille ?? 0;
@@ -503,98 +521,122 @@ export default function OrderDetailPage() {
 
       {/* Section 3: Versand */}
       <Section title="Versand / Fracht">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label className={labelCls}>Container</label>
-            <div className="flex items-end gap-1">
-              <select value={freight.containerId ?? ''} onChange={e => setFreight('containerId', e.target.value)} className={inputCls}>
-                <option value="">— auswählen —</option>
-                {containers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-              <LinkBtn to={`/procurement/containers${freight.containerId ? '?highlight=' + freight.containerId : ''}`} show={!!freight.containerId} />
+        {orderFreights.map((f, idx) => (
+          <div key={idx} className="border border-dark-700 rounded-lg p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium text-dark-300">Container {idx + 1}</h3>
+              <button onClick={() => removeFreight(idx)}
+                className="p-1 text-dark-500 hover:text-red-400" title="Container entfernen">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className={labelCls}>Container</label>
+                <div className="flex items-end gap-1">
+                  <select value={f.containerId ?? ''} onChange={e => setFreightField(idx, 'containerId', e.target.value)} className={inputCls}>
+                    <option value="">— auswählen —</option>
+                    {containers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  <LinkBtn to={`/procurement/containers${f.containerId ? '?highlight=' + f.containerId : ''}`} show={!!f.containerId} />
+                </div>
+              </div>
+              <div>
+                <label className={labelCls}>Container-Nr.</label>
+                <input type="text" value={f.containerNr ?? ''} onChange={e => setFreightField(idx, 'containerNr', e.target.value)} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>Frachtführer</label>
+                <div className="flex items-end gap-1">
+                  <select value={f.freightCarrierId ?? ''} onChange={e => setFreightField(idx, 'freightCarrierId', e.target.value)} className={inputCls}>
+                    <option value="">— auswählen —</option>
+                    {freightCarriers.map(fc => <option key={fc.id} value={fc.id}>{fc.name}</option>)}
+                  </select>
+                  <LinkBtn to={`/procurement/freight-carriers${f.freightCarrierId ? '?highlight=' + f.freightCarrierId : ''}`} show={!!f.freightCarrierId} />
+                </div>
+              </div>
+              <div>
+                <label className={labelCls}>Hafen ab</label>
+                <div className="flex items-end gap-1">
+                  <select value={f.harbourIdFrom ?? ''} onChange={e => setFreightField(idx, 'harbourIdFrom', e.target.value)} className={inputCls}>
+                    <option value="">— auswählen —</option>
+                    {harbours.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+                  </select>
+                  <LinkBtn to={`/procurement/harbours${f.harbourIdFrom ? '?highlight=' + f.harbourIdFrom : ''}`} show={!!f.harbourIdFrom} />
+                </div>
+              </div>
+              <div>
+                <label className={labelCls}>Hafen an</label>
+                <div className="flex items-end gap-1">
+                  <select value={f.harbourIdTo ?? ''} onChange={e => setFreightField(idx, 'harbourIdTo', e.target.value)} className={inputCls}>
+                    <option value="">— auswählen —</option>
+                    {harbours.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+                  </select>
+                  <LinkBtn to={`/procurement/harbours${f.harbourIdTo ? '?highlight=' + f.harbourIdTo : ''}`} show={!!f.harbourIdTo} />
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <DateInput label="Versanddatum" value={f.shippingDate} onChange={v => setFreightField(idx, 'shippingDate', v)} />
+              <DateInput label="Voraussichtliche Ankunft" value={f.estimatedArrival} onChange={v => setFreightField(idx, 'estimatedArrival', v)} />
+              <DateInput label="Ankunft" value={f.arrival} onChange={v => setFreightField(idx, 'arrival', v)} />
+              <DateInput label="Avis Spediteur" value={f.avisShipperDate} onChange={v => setFreightField(idx, 'avisShipperDate', v)} />
+              <DateInput label="Ursprungszeugnis" value={f.docOfOrigin} onChange={v => setFreightField(idx, 'docOfOrigin', v)} />
+            </div>
+            <div className="flex gap-6">
+              {([
+                ['docOfOriginChecked', 'UZ geprüft'],
+                ['docOfOriginSigned', 'UZ unterschrieben'],
+                ['docOfOriginShipped', 'UZ versandt'],
+              ] as const).map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2 text-sm text-dark-300 cursor-pointer">
+                  <input type="checkbox" checked={!!(f as Record<string, unknown>)[key]}
+                    onChange={e => setFreightField(idx, key as keyof OrderFreight, e.target.checked)}
+                    className="w-4 h-4 rounded border-dark-600 bg-dark-800 text-primary-500" />
+                  {label}
+                </label>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <NumInput label="Seefracht USD" value={f.seaFreightUsd ?? 0} onChange={v => setFreightField(idx, 'seaFreightUsd', v)} />
+              <NumInput label="EBS USD" value={f.emergencyBunkerSurchargeUsd ?? 0} onChange={v => setFreightField(idx, 'emergencyBunkerSurchargeUsd', v)} />
+              <NumInput label="PSS USD" value={f.peakSeasonSurchargeUsd ?? 0} onChange={v => setFreightField(idx, 'peakSeasonSurchargeUsd', v)} />
+              <NumInput label="Suez-Kanal-Zuschlag USD" value={f.suezCanalAddonUsd ?? 0} onChange={v => setFreightField(idx, 'suezCanalAddonUsd', v)} />
+              <NumInput label="Gefahrgutzuschlag USD" value={f.dangerPayUsd ?? 0} onChange={v => setFreightField(idx, 'dangerPayUsd', v)} />
+              <div>
+                <label className={labelCls}>Dollarkurs (Fracht)</label>
+                <div className="flex items-end gap-1">
+                  <input type="number" step="0.00001" value={f.dollarRate ?? 0}
+                    onChange={e => setFreightField(idx, 'dollarRate', parseFloat(e.target.value) || 0)}
+                    className={inputCls} />
+                  <FetchRateButton label="Dollarkurs (Fracht)" onRate={rate => setFreightField(idx, 'dollarRate', rate)} />
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <NumInput label="Frachtsumme EUR" value={f.freightageEur ?? 0} onChange={v => setFreightField(idx, 'freightageEur', v)} />
+              <NumInput label="Vorauszahlung Fracht EUR" value={f.preFreightageEur ?? 0} onChange={v => setFreightField(idx, 'preFreightageEur', v)} />
+              <NumInput label="THC EUR" value={f.thcEur ?? 0} onChange={v => setFreightField(idx, 'thcEur', v)} />
+              <NumInput label="ISPS EUR" value={f.ispsEur ?? 0} onChange={v => setFreightField(idx, 'ispsEur', v)} />
+              <NumInput label="Konnossement-Gebühr EUR" value={f.blDocFeeEur ?? 0} onChange={v => setFreightField(idx, 'blDocFeeEur', v)} />
+              <NumInput label="Nachfolgegebühren EUR" value={f.followUpFeesEur ?? 0} onChange={v => setFreightField(idx, 'followUpFeesEur', v)} />
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <NumInput label="Zollabfertigung EUR" value={f.customsClearanceEur ?? 0} onChange={v => setFreightField(idx, 'customsClearanceEur', v)} />
+              <NumInput label="Zoll EUR" value={f.customsEur ?? 0} onChange={v => setFreightField(idx, 'customsEur', v)} />
+              <NumInput label="Zollsatz %" value={f.customsPercent ?? 0} onChange={v => setFreightField(idx, 'customsPercent', v)} step="0.001" />
+              <div>
+                <label className={labelCls}>ZTN / Referenz</label>
+                <input type="text" value={f.ztn ?? ''} onChange={e => setFreightField(idx, 'ztn', e.target.value)} className={inputCls} />
+              </div>
             </div>
           </div>
-          <div>
-            <label className={labelCls}>Container-Nr.</label>
-            <input type="text" value={freight.containerNr ?? ''} onChange={e => setFreight('containerNr', e.target.value)} className={inputCls} />
-          </div>
-          <div>
-            <label className={labelCls}>Frachtführer</label>
-            <div className="flex items-end gap-1">
-              <select value={freight.freightCarrierId ?? ''} onChange={e => setFreight('freightCarrierId', e.target.value)} className={inputCls}>
-                <option value="">— auswählen —</option>
-                {freightCarriers.map(fc => <option key={fc.id} value={fc.id}>{fc.name}</option>)}
-              </select>
-              <LinkBtn to={`/procurement/freight-carriers${freight.freightCarrierId ? '?highlight=' + freight.freightCarrierId : ''}`} show={!!freight.freightCarrierId} />
-            </div>
-          </div>
-          <div>
-            <label className={labelCls}>Hafen ab</label>
-            <div className="flex items-end gap-1">
-              <select value={freight.harbourIdFrom ?? ''} onChange={e => setFreight('harbourIdFrom', e.target.value)} className={inputCls}>
-                <option value="">— auswählen —</option>
-                {harbours.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
-              </select>
-              <LinkBtn to={`/procurement/harbours${freight.harbourIdFrom ? '?highlight=' + freight.harbourIdFrom : ''}`} show={!!freight.harbourIdFrom} />
-            </div>
-          </div>
-          <div>
-            <label className={labelCls}>Hafen an</label>
-            <div className="flex items-end gap-1">
-              <select value={freight.harbourIdTo ?? ''} onChange={e => setFreight('harbourIdTo', e.target.value)} className={inputCls}>
-                <option value="">— auswählen —</option>
-                {harbours.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
-              </select>
-              <LinkBtn to={`/procurement/harbours${freight.harbourIdTo ? '?highlight=' + freight.harbourIdTo : ''}`} show={!!freight.harbourIdTo} />
-            </div>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <DateInput label="Versanddatum" value={freight.shippingDate} onChange={v => setFreight('shippingDate', v)} />
-          <DateInput label="Voraussichtliche Ankunft" value={freight.estimatedArrival} onChange={v => setFreight('estimatedArrival', v)} />
-          <DateInput label="Ankunft" value={freight.arrival} onChange={v => setFreight('arrival', v)} />
-          <DateInput label="Avis Spediteur" value={freight.avisShipperDate} onChange={v => setFreight('avisShipperDate', v)} />
-          <DateInput label="Ursprungszeugnis" value={freight.docOfOrigin} onChange={v => setFreight('docOfOrigin', v)} />
-        </div>
-        <div className="flex gap-6">
-          {([
-            ['docOfOriginChecked', 'UZ geprüft'],
-            ['docOfOriginSigned', 'UZ unterschrieben'],
-            ['docOfOriginShipped', 'UZ versandt'],
-          ] as const).map(([key, label]) => (
-            <label key={key} className="flex items-center gap-2 text-sm text-dark-300 cursor-pointer">
-              <input type="checkbox" checked={!!(freight as Record<string, unknown>)[key]}
-                onChange={e => setFreight(key as keyof OrderFreight, e.target.checked)}
-                className="w-4 h-4 rounded border-dark-600 bg-dark-800 text-primary-500" />
-              {label}
-            </label>
-          ))}
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <NumInput label="Seefracht USD" value={freight.seaFreightUsd ?? 0} onChange={v => setFreight('seaFreightUsd', v)} />
-          <NumInput label="EBS USD" value={freight.emergencyBunkerSurchargeUsd ?? 0} onChange={v => setFreight('emergencyBunkerSurchargeUsd', v)} />
-          <NumInput label="PSS USD" value={freight.peakSeasonSurchargeUsd ?? 0} onChange={v => setFreight('peakSeasonSurchargeUsd', v)} />
-          <NumInput label="Suez-Kanal-Zuschlag USD" value={freight.suezCanalAddonUsd ?? 0} onChange={v => setFreight('suezCanalAddonUsd', v)} />
-          <NumInput label="Gefahrgutzuschlag USD" value={freight.dangerPayUsd ?? 0} onChange={v => setFreight('dangerPayUsd', v)} />
-          <NumInput label="Dollarkurs (Fracht)" value={freight.dollarRate ?? 0} onChange={v => setFreight('dollarRate', v)} step="0.00001" />
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <NumInput label="Frachtsumme EUR" value={freight.freightageEur ?? 0} onChange={v => setFreight('freightageEur', v)} />
-          <NumInput label="Vorauszahlung Fracht EUR" value={freight.preFreightageEur ?? 0} onChange={v => setFreight('preFreightageEur', v)} />
-          <NumInput label="THC EUR" value={freight.thcEur ?? 0} onChange={v => setFreight('thcEur', v)} />
-          <NumInput label="ISPS EUR" value={freight.ispsEur ?? 0} onChange={v => setFreight('ispsEur', v)} />
-          <NumInput label="Konnossement-Gebühr EUR" value={freight.blDocFeeEur ?? 0} onChange={v => setFreight('blDocFeeEur', v)} />
-          <NumInput label="Nachfolgegebühren EUR" value={freight.followUpFeesEur ?? 0} onChange={v => setFreight('followUpFeesEur', v)} />
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <NumInput label="Zollabfertigung EUR" value={freight.customsClearanceEur ?? 0} onChange={v => setFreight('customsClearanceEur', v)} />
-          <NumInput label="Zoll EUR" value={freight.customsEur ?? 0} onChange={v => setFreight('customsEur', v)} />
-          <NumInput label="Zollsatz %" value={freight.customsPercent ?? 0} onChange={v => setFreight('customsPercent', v)} step="0.001" />
-          <div>
-            <label className={labelCls}>ZTN / Referenz</label>
-            <input type="text" value={freight.ztn ?? ''} onChange={e => setFreight('ztn', e.target.value)} className={inputCls} />
-          </div>
-        </div>
+        ))}
+        <button onClick={addFreight}
+          className="flex items-center gap-2 px-3 py-1.5 text-sm bg-dark-700 text-dark-300 rounded-lg hover:bg-dark-600 hover:text-white">
+          <Plus className="w-4 h-4" />
+          Container hinzufügen
+        </button>
       </Section>
 
       {/* Section 4: Warenbezugskosten */}
@@ -623,7 +665,7 @@ export default function OrderDetailPage() {
                 </div>
                 <div className="border-t border-dark-700 my-1" />
                 <div className="flex justify-between text-dark-300">
-                  <span>Seefracht ({calcEK.totalSeaUSD.toFixed(2)} USD) ÷ {((draft.freight as Partial<OrderFreight>)?.dollarRate ?? 0) > 0 ? ((draft.freight as Partial<OrderFreight>)?.dollarRate ?? 0).toFixed(4) : calcEK.dollarRateAvg.toFixed(4)}</span>
+                  <span>Seefracht ({calcEK.totalSeaUSD.toFixed(2)} USD) ÷ {calcEK.dollarRateAvg.toFixed(4)}</span>
                   <span className="font-mono">{calcEK.seaFreightEUR.toFixed(2)} EUR</span>
                 </div>
                 <div className="flex justify-between text-dark-300">
