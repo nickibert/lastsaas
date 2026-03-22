@@ -361,25 +361,27 @@ export const calendarEntriesApi = {
 };
 
 // Orders
+const normalizeOrderDates = (data: Partial<Order>): Partial<Order> => {
+  const p = { ...data };
+  if (p.orderDate && !p.orderDate.includes('T')) p.orderDate = p.orderDate + 'T00:00:00Z';
+  if (p.freight) {
+    const f = { ...p.freight };
+    const freightDateFields = ['shippingDate', 'estimatedArrival', 'arrival', 'avisShipperDate'] as const;
+    for (const key of freightDateFields) {
+      const v = f[key];
+      if (v && !v.includes('T')) (f as Record<string, string>)[key] = v + 'T00:00:00Z';
+    }
+    p.freight = f;
+  }
+  return p;
+};
+
 export const ordersApi = {
   list: (q?: string, page = 1, limit = 25) => api.get<PagedResult<Order>>(`${BASE}/orders`, { params: { q, page, limit } }).then(r => r.data),
   applyEK: (id: string) => api.post<{ updated: number }>(`${BASE}/orders/${id}/apply-ek`).then(r => r.data),
-  create: (data: Partial<Order>) => {
-    // Go time.Time requires RFC3339; HTML date inputs return "YYYY-MM-DD"
-    const payload = { ...data };
-    if (payload.orderDate && !payload.orderDate.includes('T')) {
-      payload.orderDate = payload.orderDate + 'T00:00:00Z';
-    }
-    return api.post<Order>(`${BASE}/orders`, payload).then(r => r.data);
-  },
+  create: (data: Partial<Order>) => api.post<Order>(`${BASE}/orders`, normalizeOrderDates(data)).then(r => r.data),
   get: (id: string) => api.get<Order>(`${BASE}/orders/${id}`).then(r => r.data),
-  update: (id: string, data: Partial<Order>) => {
-    const payload = { ...data };
-    if (payload.orderDate && !payload.orderDate.includes('T')) {
-      payload.orderDate = payload.orderDate + 'T00:00:00Z';
-    }
-    return api.put(`${BASE}/orders/${id}`, payload);
-  },
+  update: (id: string, data: Partial<Order>) => api.put(`${BASE}/orders/${id}`, normalizeOrderDates(data)),
   delete: (id: string) => api.delete(`${BASE}/orders/${id}`),
   listTasks: (id: string) => api.get<OrderTask[]>(`${BASE}/orders/${id}/tasks`).then(r => r.data),
   createTask: (id: string, data: Partial<OrderTask>) => api.post<OrderTask>(`${BASE}/orders/${id}/tasks`, data).then(r => r.data),
