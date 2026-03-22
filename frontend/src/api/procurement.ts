@@ -382,6 +382,8 @@ export const ordersApi = {
   create: (data: Partial<Order>) => api.post<Order>(`${BASE}/orders`, normalizeOrderDates(data)).then(r => r.data),
   get: (id: string) => api.get<Order>(`${BASE}/orders/${id}`).then(r => r.data),
   update: (id: string, data: Partial<Order>) => api.put(`${BASE}/orders/${id}`, normalizeOrderDates(data)),
+  patchFreightDate: (id: string, field: string, date: string) =>
+    api.patch(`${BASE}/orders/${id}/freight-date`, { field, date: date.includes('T') ? date : date + 'T00:00:00Z' }),
   delete: (id: string) => api.delete(`${BASE}/orders/${id}`),
   listTasks: (id: string) => api.get<OrderTask[]>(`${BASE}/orders/${id}/tasks`).then(r => r.data),
   createTask: (id: string, data: Partial<OrderTask>) => api.post<OrderTask>(`${BASE}/orders/${id}/tasks`, data).then(r => r.data),

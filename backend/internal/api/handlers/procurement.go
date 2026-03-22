@@ -106,6 +106,7 @@ func (h *ProcurementHandler) RegisterRoutes(r *mux.Router, authMW mux.Middleware
 	s.HandleFunc("/orders/{id}", h.getOrder).Methods(http.MethodGet)
 	s.HandleFunc("/orders/{id}", h.updateOrder).Methods(http.MethodPut)
 	s.HandleFunc("/orders/{id}", h.deleteOrder).Methods(http.MethodDelete)
+	s.HandleFunc("/orders/{id}/freight-date", h.patchOrderFreightDate).Methods(http.MethodPatch)
 
 	// Order EK calculation
 	s.HandleFunc("/orders/{id}/apply-ek", h.applyOrderEK).Methods(http.MethodPost)
@@ -1073,6 +1074,47 @@ func (h *ProcurementHandler) updateOrder(w http.ResponseWriter, r *http.Request)
 	doc.UpdatedAt = time.Now().UTC()
 	h.db.Orders().UpdateOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID},
 		bson.M{"$set": doc}) //nolint
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *ProcurementHandler) patchOrderFreightDate(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Field string `json:"field"`
+		Date  string `json:"date"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	allowed := map[string]bool{
+		"shippingDate": true, "estimatedArrival": true, "arrival": true,
+		"avisShipperDate": true, "docOfOrigin": true,
+	}
+	if !allowed[body.Field] {
+		http.Error(w, "invalid field", http.StatusBadRequest)
+		return
+	}
+	t, err := time.Parse(time.RFC3339, body.Date)
+	if err != nil {
+		http.Error(w, "invalid date format", http.StatusBadRequest)
+		return
+	}
+	h.db.Orders().UpdateOne(r.Context(),
+		bson.M{"_id": id, "tenantId": tenantID},
+		bson.M{"$set": bson.M{
+			"freight." + body.Field: t,
+			"updatedAt":             time.Now().UTC(),
+		}}) //nolint
 	w.WriteHeader(http.StatusNoContent)
 }
 
