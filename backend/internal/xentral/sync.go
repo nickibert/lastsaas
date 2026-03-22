@@ -376,10 +376,10 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 
 	now := time.Now()
 
-	// Resolve order date
+	// Resolve order date (try orderDate, fall back to documentDate)
 	orderDate := now
-	if xo.OrderDate != "" {
-		if t, parseErr := time.Parse("2006-01-02", xo.OrderDate); parseErr == nil {
+	if d := xo.ResolvedOrderDate(); d != "" {
+		if t, parseErr := time.Parse("2006-01-02", d); parseErr == nil {
 			orderDate = t
 		}
 	}
@@ -398,7 +398,7 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 		order := models.Order{
 			ID:          primitive.NewObjectID(),
 			TenantID:    tenantID,
-			OrderNumber: xo.OrderNumber,
+			OrderNumber: xo.ResolvedOrderNumber(),
 			OrderDate:   orderDate,
 			OrderSumUSD: xo.TotalNet,
 			Products:    orderProducts,
@@ -414,7 +414,7 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 			Entity:    "order",
 			LocalID:   order.ID,
 			XentralID: xo.ID,
-			XentralNr: xo.OrderNumber,
+			XentralNr: xo.ResolvedOrderNumber(),
 			CreatedAt: now,
 			UpdatedAt: now,
 		})

@@ -8,7 +8,7 @@
 //   GET /api/v1/products        – article list
 //   GET /api/v1/customers       – customer list
 //   GET /api/v1/suppliers       – supplier list
-//   GET /api/v1/sales-orders    – incoming sales orders
+//   GET /api/v1/salesOrders    – incoming sales orders
 package xentral
 
 import (
@@ -19,14 +19,20 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
 // Client is a thin HTTP wrapper around the Xentral REST API.
+// It enforces a minimum interval between requests to stay within Xentral's
+// default rate limit of 100 calls/minute (~600 ms per request → ~100/min).
 type Client struct {
-	baseURL    string
-	token      string
-	httpClient *http.Client
+	baseURL     string
+	token       string
+	httpClient  *http.Client
+	mu          sync.Mutex
+	lastReqAt   time.Time
+	minInterval time.Duration
 }
 
 // NewClient creates a Xentral API client.
@@ -38,6 +44,7 @@ func NewClient(baseURL, token string) *Client {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		minInterval: 650 * time.Millisecond, // ~92 req/min, safely below 100/min limit
 	}
 }
 
@@ -153,15 +160,35 @@ type XSupplier struct {
 }
 
 // XSalesOrder represents an incoming sales order from Xentral.
+// Xentral uses "documentNumber" in v1/salesOrders responses; "orderNumber" is
+// kept as a fallback for older API variants.
 type XSalesOrder struct {
-	ID          string           `json:"id"`
-	OrderNumber string           `json:"orderNumber"`
-	Status      string           `json:"status"`
-	OrderDate   string           `json:"orderDate"`
-	Customer    XOrderCustomer   `json:"customer"`
-	Positions   []XOrderPosition `json:"positions"`
-	TotalNet    float64          `json:"totalNet"`
-	Currency    string           `json:"currency"`
+	ID             string           `json:"id"`
+	OrderNumber    string           `json:"orderNumber"`
+	DocumentNumber string           `json:"documentNumber"`
+	Status         string           `json:"status"`
+	OrderDate      string           `json:"orderDate"`
+	DocumentDate   string           `json:"documentDate"`
+	Customer       XOrderCustomer   `json:"customer"`
+	Positions      []XOrderPosition `json:"positions"`
+	TotalNet       float64          `json:"totalNet"`
+	Currency       string           `json:"currency"`
+}
+
+// ResolvedOrderNumber returns the first non-empty order/document number.
+func (o *XSalesOrder) ResolvedOrderNumber() string {
+	if o.OrderNumber != "" {
+		return o.OrderNumber
+	}
+	return o.DocumentNumber
+}
+
+// ResolvedOrderDate returns the first non-empty order/document date string.
+func (o *XSalesOrder) ResolvedOrderDate() string {
+	if o.OrderDate != "" {
+		return o.OrderDate
+	}
+	return o.DocumentDate
 }
 
 type XAddress struct {
@@ -267,7 +294,7 @@ func (c *Client) ListSuppliers(ctx context.Context) ([]XSupplier, error) {
 func (c *Client) ListSalesOrders(ctx context.Context) ([]XSalesOrder, error) {
 	var all []XSalesOrder
 	for page := 1; ; page++ {
-		batch, err := listPage[XSalesOrder](c, ctx, "/api/v1/sales-orders", page)
+		batch, err := listPage[XSalesOrder](c, ctx, "/api/v1/salesOrders", page)
 		if err != nil {
 			return nil, err
 		}
@@ -284,6 +311,20 @@ func (c *Client) ListSalesOrders(ctx context.Context) ([]XSalesOrder, error) {
 // -------------------------------------------------------------------
 
 func (c *Client) get(ctx context.Context, path string, params url.Values) ([]byte, error) {
+	// Enforce rate limit: wait until minInterval has passed since the last request.
+	c.mu.Lock()
+	if wait := c.minInterval - time.Since(c.lastReqAt); wait > 0 {
+		c.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
+		}
+		c.mu.Lock()
+	}
+	c.lastReqAt = time.Now()
+	c.mu.Unlock()
+
 	u := c.baseURL + path
 	if len(params) > 0 {
 		u += "?" + params.Encode()
