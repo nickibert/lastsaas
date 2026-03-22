@@ -1,6 +1,6 @@
 import api from './client';
 
-const BASE = '/api/procurement/integrations/xentral';
+const BASE = '/procurement/integrations/xentral';
 
 // -------------------------------------------------------------------
 // Types
