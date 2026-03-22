@@ -133,18 +133,48 @@ type Product struct {
 }
 
 type ProductPriceList struct {
-	ID        primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
-	TenantID  primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
-	ProductID primitive.ObjectID  `json:"productId" bson:"productId" validate:"required"`
-	Type      string              `json:"type" bson:"type" validate:"required,oneof=EK VK"`
-	Name      string              `json:"name" bson:"name" validate:"required,min=1,max=100"`
-	Price     float64             `json:"price" bson:"price" validate:"min=0"`
-	Currency  string              `json:"currency" bson:"currency" validate:"required,len=3"`
-	ValidFrom *time.Time          `json:"validFrom,omitempty" bson:"validFrom,omitempty"`
-	ValidTo   *time.Time          `json:"validTo,omitempty" bson:"validTo,omitempty"`
-	Notes     string              `json:"notes,omitempty" bson:"notes,omitempty" validate:"omitempty,max=500"`
-	CreatedAt time.Time           `json:"createdAt" bson:"createdAt"`
-	UpdatedAt time.Time           `json:"updatedAt" bson:"updatedAt"`
+	ID           primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
+	TenantID     primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
+	ProductID    primitive.ObjectID  `json:"productId" bson:"productId" validate:"required"`
+	Type         string              `json:"type" bson:"type" validate:"required,oneof=EK VK"`
+	Name         string              `json:"name" bson:"name" validate:"required,min=1,max=100"`
+	Price        float64             `json:"price" bson:"price" validate:"min=0"`
+	Currency     string              `json:"currency" bson:"currency" validate:"required,len=3"`
+	ValidFrom    *time.Time          `json:"validFrom,omitempty" bson:"validFrom,omitempty"`
+	ValidTo      *time.Time          `json:"validTo,omitempty" bson:"validTo,omitempty"`
+	Notes        string              `json:"notes,omitempty" bson:"notes,omitempty" validate:"omitempty,max=500"`
+	// Provenance: set when created by applyOrderEK
+	OrderID      *primitive.ObjectID `json:"orderId,omitempty" bson:"orderId,omitempty"`
+	FreightIndex *int                `json:"freightIndex,omitempty" bson:"freightIndex,omitempty"`
+	Quantity     int                 `json:"quantity,omitempty" bson:"quantity,omitempty"`
+	Source       string              `json:"source,omitempty" bson:"source,omitempty"` // "order" | "import" | "manual"
+	CreatedAt    time.Time           `json:"createdAt" bson:"createdAt"`
+	UpdatedAt    time.Time           `json:"updatedAt" bson:"updatedAt"`
+}
+
+// ---------------------------------------------------------------------------
+// Inventory Lots (FIFO / LIFO / Weighted-Average valuation)
+// ---------------------------------------------------------------------------
+
+// InventoryLot records a single goods receipt batch for one product.
+// Each container arrival writes a separate lot so that FIFO/LIFO methods
+// can walk the lots in chronological order.
+type InventoryLot struct {
+	ID           primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
+	TenantID     primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
+	ProductID    primitive.ObjectID  `json:"productId" bson:"productId" validate:"required"`
+	OrderID      *primitive.ObjectID `json:"orderId,omitempty" bson:"orderId,omitempty"`
+	FreightIndex *int                `json:"freightIndex,omitempty" bson:"freightIndex,omitempty"`
+	ReceivedAt   time.Time           `json:"receivedAt" bson:"receivedAt" validate:"required"`
+	Quantity     int                 `json:"quantity" bson:"quantity" validate:"required,min=1"`
+	// Remaining is decremented on each outgoing stock movement; starts == Quantity.
+	Remaining    int                 `json:"remaining" bson:"remaining" validate:"min=0"`
+	UnitEkEUR    float64             `json:"unitEkEur" bson:"unitEkEur" validate:"min=0"`
+	// Source: "order" | "import" (manual stock take-over)
+	Source       string              `json:"source" bson:"source" validate:"required,oneof=order import"`
+	Notes        string              `json:"notes,omitempty" bson:"notes,omitempty" validate:"omitempty,max=500"`
+	CreatedAt    time.Time           `json:"createdAt" bson:"createdAt"`
+	UpdatedAt    time.Time           `json:"updatedAt" bson:"updatedAt"`
 }
 
 // ---------------------------------------------------------------------------
@@ -247,17 +277,19 @@ type OrderPayment struct {
 }
 
 type OrderProduct struct {
-	ProductID         primitive.ObjectID `json:"productId" bson:"productId" validate:"required"`
-	Quantity          int                `json:"quantity" bson:"quantity" validate:"required,min=1"`
-	UnitPriceUSD      float64            `json:"unitPriceUsd" bson:"unitPriceUsd" validate:"min=0"`
-	TotalPriceUSD     float64            `json:"totalPriceUsd" bson:"totalPriceUsd" validate:"min=0"`
-	LengthMM          int                `json:"lengthMm" bson:"lengthMm" validate:"min=0"`
-	WidthMM           int                `json:"widthMm" bson:"widthMm" validate:"min=0"`
-	HeightMM          int                `json:"heightMm" bson:"heightMm" validate:"min=0"`
-	VolumeM3          float64            `json:"volumeM3" bson:"volumeM3" validate:"min=0"`
-	WeightKg          float64            `json:"weightKg" bson:"weightKg" validate:"min=0"`
-	Credited          bool               `json:"credited" bson:"credited"`
-	InventoryChecked  bool               `json:"inventoryChecked" bson:"inventoryChecked"`
+	ProductID        primitive.ObjectID `json:"productId" bson:"productId" validate:"required"`
+	Quantity         int                `json:"quantity" bson:"quantity" validate:"required,min=1"`
+	UnitPriceUSD     float64            `json:"unitPriceUsd" bson:"unitPriceUsd" validate:"min=0"`
+	TotalPriceUSD    float64            `json:"totalPriceUsd" bson:"totalPriceUsd" validate:"min=0"`
+	LengthMM         int                `json:"lengthMm" bson:"lengthMm" validate:"min=0"`
+	WidthMM          int                `json:"widthMm" bson:"widthMm" validate:"min=0"`
+	HeightMM         int                `json:"heightMm" bson:"heightMm" validate:"min=0"`
+	VolumeM3         float64            `json:"volumeM3" bson:"volumeM3" validate:"min=0"`
+	WeightKg         float64            `json:"weightKg" bson:"weightKg" validate:"min=0"`
+	Credited         bool               `json:"credited" bson:"credited"`
+	InventoryChecked bool               `json:"inventoryChecked" bson:"inventoryChecked"`
+	// FreightIndex links this line item to freights[i]. nil = costs spread across all containers (legacy).
+	FreightIndex *int `json:"freightIndex,omitempty" bson:"freightIndex,omitempty"`
 }
 
 type OrderFreight struct {

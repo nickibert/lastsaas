@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"lastsaas/internal/db"
@@ -98,6 +100,15 @@ func (h *ProcurementHandler) RegisterRoutes(r *mux.Router, authMW mux.Middleware
 	s.HandleFunc("/products/{id}/price-lists", h.createProductPriceList).Methods(http.MethodPost)
 	s.HandleFunc("/products/{id}/price-lists/{priceListId}", h.updateProductPriceList).Methods(http.MethodPut)
 	s.HandleFunc("/products/{id}/price-lists/{priceListId}", h.deleteProductPriceList).Methods(http.MethodDelete)
+
+	// EK history + chart
+	s.HandleFunc("/products/{id}/ek-history", h.getEKHistory).Methods(http.MethodGet)
+	s.HandleFunc("/products/{id}/ek-history/chart", h.getEKHistoryChart).Methods(http.MethodGet)
+	s.HandleFunc("/products/{id}/inventory-lots", h.listInventoryLots).Methods(http.MethodGet)
+
+	// Inventory import / export
+	s.HandleFunc("/inventory/import", h.importInventoryLots).Methods(http.MethodPost)
+	s.HandleFunc("/inventory/export", h.exportInventoryValuation).Methods(http.MethodGet)
 
 	// Calendar
 	s.HandleFunc("/calendar", h.getCalendar).Methods(http.MethodGet)
@@ -1504,23 +1515,36 @@ func (h *ProcurementHandler) deleteOffer(w http.ResponseWriter, r *http.Request)
 // EK-Kalkulation (Warenbezugskosten)
 // ---------------------------------------------------------------------------
 
-// applyOrderEK calculates the landed cost (EK) per product using the legacy formula:
+// freightCostEUR returns the total landed cost in EUR for a single OrderFreight,
+// using freightDollarRate as fallback when f.DollarRate == 0.
+func freightCostEUR(f models.OrderFreight, fallbackRate float64) float64 {
+	rate := f.DollarRate
+	if rate <= 0 {
+		rate = fallbackRate
+	}
+	frtEUR := f.FreightageEUR
+	if frtEUR == 0 {
+		frtEUR = f.PreFreightageEUR
+	}
+	seaUSD := f.SeaFreightUSD + f.EmergencyBunkerSurchargeUSD +
+		f.PeakSeasonSurchargeUSD + f.SuezCanalAddonUSD + f.DangerPayUSD
+	return frtEUR +
+		seaUSD*rate +
+		f.THCEUR + f.ISPSEUR + f.BLDocFeeEUR + f.FollowUpFeesEUR +
+		f.CustomsClearanceEUR + f.CustomsEUR
+}
+
+// applyOrderEK calculates the landed cost (EK) per product per container.
 //
-//	priceFactor  = unitPriceUSD / orderSumUSD
-//	volumeFactor = (productVolumeM3 × qty) / totalOrderVolumeM3
+// When an OrderProduct has FreightIndex set, its freight share comes only from
+// that container's costs and is volume-proportional within that container.
+// When FreightIndex is nil (legacy / unassigned), costs are spread across all
+// containers proportional to volume — preserving the original behaviour.
 //
-//	freightageEUR = freight.FreightageEUR (fallback: PreFreightageEUR)
-//	              + all additional EUR costs (sea freight, THC, customs, …)
-//	freightShare = freightageEUR × volumeFactor
-//	feesShare    = totalPaymentFees × priceFactor
-//
-//	wbk = (freightShare + feesShare) × (1000 + transportInsurancePermille) / 1000
-//
-//	dollarRateAvg = arithmetic mean of payment_dollar_rate values
-//	                (fallback: preDollarRate when no payments exist)
-//	discount = order.Discount / (orderSumUSD + order.Discount) × unitPriceUSD
-//
-//	unitEkEUR = wbk/qty + (unitPriceUSD − discount) / dollarRateAvg
+// For every processed product the function:
+//  1. Updates products.lastEk / lastEkDate
+//  2. Upserts a ProductPriceList EK record (name = order number + container)
+//  3. Upserts an InventoryLot so FIFO/LIFO valuation can walk the batches
 func (h *ProcurementHandler) applyOrderEK(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := procurementTenantID(r)
 	if !ok {
@@ -1568,45 +1592,39 @@ func (h *ProcurementHandler) applyOrderEK(w http.ResponseWriter, r *http.Request
 		order.Freights = []models.OrderFreight{*order.Freight}
 	}
 
-	// --- Total freight EUR (sum over all containers) ---
-	totalFreightEUR := 0.0
-	for _, f := range order.Freights {
-		fRate := f.DollarRate
-		if fRate <= 0 {
-			fRate = dollarRateAvg
-		}
-		freightageEUR := f.FreightageEUR
-		if freightageEUR == 0 {
-			freightageEUR = f.PreFreightageEUR
-		}
-		totalSeaUSD := f.SeaFreightUSD +
-			f.EmergencyBunkerSurchargeUSD +
-			f.PeakSeasonSurchargeUSD +
-			f.SuezCanalAddonUSD +
-			f.DangerPayUSD
-		totalFreightEUR += freightageEUR +
-			totalSeaUSD*fRate +
-			f.THCEUR +
-			f.ISPSEUR +
-			f.BLDocFeeEUR +
-			f.FollowUpFeesEUR +
-			f.CustomsClearanceEUR +
-			f.CustomsEUR
+	// --- Pre-compute per-container freight EUR and per-container volume totals ---
+	containerFreightEUR := make([]float64, len(order.Freights))
+	for i, f := range order.Freights {
+		containerFreightEUR[i] = freightCostEUR(f, dollarRateAvg)
 	}
 
-	// --- Total order volume (m³ × quantity) ---
-	totalVolumeM3 := 0.0
-	productsWithoutVolume := 0
-	totalQuantity := 0
+	// Volume sums: one entry per container (index) + one catch-all for unassigned
+	// containerVol[i] = total m³ of products assigned to freights[i]
+	// unassignedVol   = total m³ of products without a FreightIndex
+	containerVol := make([]float64, len(order.Freights))
+	containerQty := make([]int, len(order.Freights))
+	unassignedVol := 0.0
+	unassignedQty := 0
 	for _, op := range order.Products {
-		totalVolumeM3 += op.VolumeM3 * float64(op.Quantity)
-		totalQuantity += op.Quantity
-		if op.VolumeM3 == 0 {
-			productsWithoutVolume++
+		if op.FreightIndex != nil && *op.FreightIndex >= 0 && *op.FreightIndex < len(order.Freights) {
+			containerVol[*op.FreightIndex] += op.VolumeM3 * float64(op.Quantity)
+			containerQty[*op.FreightIndex] += op.Quantity
+		} else {
+			unassignedVol += op.VolumeM3 * float64(op.Quantity)
+			unassignedQty += op.Quantity
 		}
 	}
 
+	// Total freight for unassigned products = sum of all containers
+	totalFreightEUR := 0.0
+	for _, c := range containerFreightEUR {
+		totalFreightEUR += c
+	}
+
+	// Discount and orderSumUSD for price factor calculations
 	now := time.Now().UTC()
+	orderRef := order.ID
+
 	updated := 0
 
 	for _, op := range order.Products {
@@ -1614,24 +1632,44 @@ func (h *ProcurementHandler) applyOrderEK(w http.ResponseWriter, r *http.Request
 			continue
 		}
 
-		// Volume factor (fallback: equal share across all units if volume unknown)
-		var volumeFactor float64
-		if totalVolumeM3 > 0 && productsWithoutVolume == 0 {
-			volumeFactor = (op.VolumeM3 * float64(op.Quantity)) / totalVolumeM3
-		} else if totalQuantity > 0 {
-			volumeFactor = float64(op.Quantity) / float64(totalQuantity)
+		// --- Determine which freight costs and volume pool to use ---
+		var relevantFreightEUR float64
+		var volumePool float64
+		var qtyPool int
+		var freightIdx *int
+
+		if op.FreightIndex != nil && *op.FreightIndex >= 0 && *op.FreightIndex < len(order.Freights) {
+			idx := *op.FreightIndex
+			relevantFreightEUR = containerFreightEUR[idx]
+			volumePool = containerVol[idx]
+			qtyPool = containerQty[idx]
+			freightIdx = op.FreightIndex
+		} else {
+			// Legacy: spread across all containers
+			relevantFreightEUR = totalFreightEUR
+			volumePool = unassignedVol
+			qtyPool = unassignedQty
 		}
 
-		// Price factor (Preisfaktor für Gebühren)
+		// Volume factor within the relevant pool
+		prodVol := op.VolumeM3 * float64(op.Quantity)
+		var volumeFactor float64
+		if volumePool > 0 {
+			volumeFactor = prodVol / volumePool
+		} else if qtyPool > 0 {
+			volumeFactor = float64(op.Quantity) / float64(qtyPool)
+		}
+
+		// Price factor for payment fees
 		priceFactor := 0.0
 		if order.OrderSumUSD > 0 {
 			priceFactor = op.UnitPriceUSD / order.OrderSumUSD
 		}
 
-		freightShare := totalFreightEUR * volumeFactor
+		freightShare := relevantFreightEUR * volumeFactor
 		feesShare := totalPaymentFees * priceFactor
 
-		// WBK with Promille multiplier
+		// WBK (Waren-Bezugskosten) with transport insurance
 		wbk := (freightShare + feesShare) * (1000 + order.TransportInsurancePermille) / 1000
 
 		// Discount proportional to product's price share
@@ -1642,12 +1680,98 @@ func (h *ProcurementHandler) applyOrderEK(w http.ResponseWriter, r *http.Request
 
 		unitEkEUR := math.Round((wbk/float64(op.Quantity)+(op.UnitPriceUSD-discount)/dollarRateAvg)*10000) / 10000
 
+		// 1. Update product.lastEk
 		if _, err := h.db.Products().UpdateOne(
 			r.Context(),
 			bson.M{"_id": op.ProductID, "tenantId": tenantID},
 			bson.M{"$set": bson.M{"lastEk": unitEkEUR, "lastEkDate": now, "updatedAt": now}},
 		); err == nil {
 			updated++
+		}
+
+		// 2. Upsert ProductPriceList EK record — one per product per container (or "all")
+		containerLabel := "Alle Container"
+		if freightIdx != nil {
+			containerLabel = fmt.Sprintf("Container %d", *freightIdx+1)
+			if *freightIdx < len(order.Freights) && order.Freights[*freightIdx].ContainerNr != "" {
+				containerLabel = order.Freights[*freightIdx].ContainerNr
+			}
+		}
+		plName := fmt.Sprintf("EK %s / %s", order.OrderNumber, containerLabel)
+		plFilter := bson.M{
+			"tenantId":  tenantID,
+			"productId": op.ProductID,
+			"type":      "EK",
+			"orderId":   orderRef,
+		}
+		if freightIdx != nil {
+			plFilter["freightIndex"] = *freightIdx
+		} else {
+			plFilter["freightIndex"] = bson.M{"$exists": false}
+		}
+		plUpdate := bson.M{"$set": bson.M{
+			"name":         plName,
+			"price":        unitEkEUR,
+			"currency":     "EUR",
+			"quantity":     op.Quantity,
+			"source":       "order",
+			"orderId":      orderRef,
+			"freightIndex": freightIdx,
+			"validFrom":    now,
+			"updatedAt":    now,
+		}, "$setOnInsert": bson.M{
+			"tenantId":  tenantID,
+			"productId": op.ProductID,
+			"type":      "EK",
+			"createdAt": now,
+		}}
+		upsertTrue := true
+		if _, err := h.db.ProductPriceLists().UpdateOne(r.Context(), plFilter, plUpdate,
+			&options.UpdateOptions{Upsert: &upsertTrue}); err != nil {
+			_ = err // price list upsert is best-effort
+		}
+
+		// 3. Upsert InventoryLot — one per product per container
+		lotFilter := bson.M{
+			"tenantId":  tenantID,
+			"productId": op.ProductID,
+			"orderId":   orderRef,
+			"source":    "order",
+		}
+		if freightIdx != nil {
+			lotFilter["freightIndex"] = *freightIdx
+		} else {
+			lotFilter["freightIndex"] = bson.M{"$exists": false}
+		}
+		// Determine receivedAt: use container arrival date if available, else now
+		receivedAt := now
+		if freightIdx != nil && *freightIdx < len(order.Freights) {
+			if arr := order.Freights[*freightIdx].Arrival; arr != nil {
+				receivedAt = *arr
+			} else if eta := order.Freights[*freightIdx].EstimatedArrival; eta != nil {
+				receivedAt = *eta
+			}
+		}
+		lotUpdate := bson.M{"$set": bson.M{
+			"quantity":   op.Quantity,
+			"unitEkEur":  unitEkEUR,
+			"receivedAt": receivedAt,
+			"updatedAt":  now,
+		}, "$setOnInsert": bson.M{
+			"tenantId":  tenantID,
+			"productId": op.ProductID,
+			"orderId":   orderRef,
+			"source":    "order",
+			"remaining": op.Quantity,
+			"createdAt": now,
+		}}
+		if freightIdx != nil {
+			lotUpdate["$set"].(bson.M)["freightIndex"] = *freightIdx
+			lotUpdate["$setOnInsert"].(bson.M)["freightIndex"] = *freightIdx
+		}
+		if _, err := h.db.InventoryLots().UpdateOne(r.Context(), lotFilter, lotUpdate,
+			&options.UpdateOptions{Upsert: &upsertTrue}); err != nil {
+			_ = err // lot upsert is best-effort
 		}
 	}
 
@@ -1752,6 +1876,322 @@ func (h *ProcurementHandler) deleteProductPriceList(w http.ResponseWriter, r *ht
 	}
 	h.db.ProductPriceLists().DeleteOne(r.Context(), bson.M{"_id": priceListID, "tenantId": tenantID}) //nolint
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------------------
+// EK History (ProductPriceList, filtered to type=EK, with chart aggregation)
+// ---------------------------------------------------------------------------
+
+// getEKHistory returns all EK price-list entries for a product in chronological
+// order, optionally filtered by date range.
+//
+// GET /products/:id/ek-history?from=YYYY-MM-DD&to=YYYY-MM-DD&format=json|csv
+func (h *ProcurementHandler) getEKHistory(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	productID, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	filter := bson.M{"tenantId": tenantID, "productId": productID, "type": "EK"}
+	if from := r.URL.Query().Get("from"); from != "" {
+		if t, err := time.Parse("2006-01-02", from); err == nil {
+			if filter["validFrom"] == nil {
+				filter["validFrom"] = bson.M{}
+			}
+			filter["validFrom"].(bson.M)["$gte"] = t
+		}
+	}
+	if to := r.URL.Query().Get("to"); to != "" {
+		if t, err := time.Parse("2006-01-02", to); err == nil {
+			t = t.Add(24 * time.Hour)
+			if filter["validFrom"] == nil {
+				filter["validFrom"] = bson.M{}
+			}
+			filter["validFrom"].(bson.M)["$lte"] = t
+		}
+	}
+
+	cursor, err := h.db.ProductPriceLists().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "validFrom", Value: 1}}))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	var rows []models.ProductPriceList
+	cursor.All(r.Context(), &rows) //nolint
+
+	if r.URL.Query().Get("format") == "csv" {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"ek-history-%s.csv\"", productID.Hex()))
+		fmt.Fprintf(w, "datum,ek_eur,menge,container,bestellnummer,quelle\n")
+		for _, row := range rows {
+			date := ""
+			if row.ValidFrom != nil {
+				date = row.ValidFrom.Format("2006-01-02")
+			}
+			container := ""
+			if row.FreightIndex != nil {
+				container = fmt.Sprintf("%d", *row.FreightIndex+1)
+			}
+			orderNr := ""
+			if row.OrderID != nil {
+				orderNr = row.OrderID.Hex()
+			}
+			fmt.Fprintf(w, "%s,%.4f,%d,%s,%s,%s\n", date, row.Price, row.Quantity, container, orderNr, row.Source)
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, rows)
+}
+
+// getEKHistoryChart returns time-series data suitable for rendering a line chart.
+//
+// GET /products/:id/ek-history/chart
+func (h *ProcurementHandler) getEKHistoryChart(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	productID, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	cursor, err := h.db.ProductPriceLists().Find(r.Context(),
+		bson.M{"tenantId": tenantID, "productId": productID, "type": "EK"},
+		options.Find().SetSort(bson.D{{Key: "validFrom", Value: 1}}))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	var rows []models.ProductPriceList
+	cursor.All(r.Context(), &rows) //nolint
+
+	type chartPoint struct {
+		Date         string  `json:"date"`
+		Price        float64 `json:"price"`
+		Quantity     int     `json:"quantity"`
+		FreightIndex *int    `json:"freightIndex,omitempty"`
+		Source       string  `json:"source"`
+	}
+	points := make([]chartPoint, 0, len(rows))
+	for _, row := range rows {
+		date := ""
+		if row.ValidFrom != nil {
+			date = row.ValidFrom.Format("2006-01-02")
+		}
+		points = append(points, chartPoint{
+			Date:         date,
+			Price:        row.Price,
+			Quantity:     row.Quantity,
+			FreightIndex: row.FreightIndex,
+			Source:       row.Source,
+		})
+	}
+	writeJSON(w, http.StatusOK, points)
+}
+
+// ---------------------------------------------------------------------------
+// Inventory Lots — CRUD + import
+// ---------------------------------------------------------------------------
+
+// listInventoryLots returns all lots for a product, sorted oldest-first (FIFO order).
+//
+// GET /products/:id/inventory-lots
+func (h *ProcurementHandler) listInventoryLots(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	productID, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	cursor, err := h.db.InventoryLots().Find(r.Context(),
+		bson.M{"tenantId": tenantID, "productId": productID},
+		options.Find().SetSort(bson.D{{Key: "receivedAt", Value: 1}}))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	var lots []models.InventoryLot
+	cursor.All(r.Context(), &lots) //nolint
+	writeJSON(w, http.StatusOK, lots)
+}
+
+// importInventoryLots handles CSV bulk import for initial stock take-over.
+//
+// POST /inventory/import
+// Body: CSV with columns: productId,menge,ek_eur,datum,notizen
+func (h *ProcurementHandler) importInventoryLots(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		http.Error(w, "form parse error", http.StatusBadRequest)
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "file required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	type importRow struct {
+		ProductIDHex string
+		Quantity     int
+		UnitEkEUR    float64
+		ReceivedAt   time.Time
+		Notes        string
+	}
+
+	now := time.Now().UTC()
+	imported := 0
+	errors := []string{}
+
+	// Read CSV line by line
+	scanner := bufio.NewScanner(file)
+	lineNum := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		lineNum++
+		if lineNum == 1 {
+			continue // skip header
+		}
+		if line == "" {
+			continue
+		}
+		parts := splitCSV(line)
+		if len(parts) < 3 {
+			errors = append(errors, fmt.Sprintf("Zeile %d: zu wenige Felder", lineNum))
+			continue
+		}
+		productOID, pErr := primitive.ObjectIDFromHex(strings.TrimSpace(parts[0]))
+		if pErr != nil {
+			errors = append(errors, fmt.Sprintf("Zeile %d: ungültige productId", lineNum))
+			continue
+		}
+		qty := 0
+		fmt.Sscanf(strings.TrimSpace(parts[1]), "%d", &qty)
+		if qty <= 0 {
+			errors = append(errors, fmt.Sprintf("Zeile %d: Menge muss > 0 sein", lineNum))
+			continue
+		}
+		ek := 0.0
+		fmt.Sscanf(strings.TrimSpace(parts[2]), "%f", &ek)
+
+		receivedAt := now
+		if len(parts) >= 4 && strings.TrimSpace(parts[3]) != "" {
+			if t, tErr := time.Parse("2006-01-02", strings.TrimSpace(parts[3])); tErr == nil {
+				receivedAt = t
+			}
+		}
+		notes := ""
+		if len(parts) >= 5 {
+			notes = strings.TrimSpace(parts[4])
+		}
+
+		lot := models.InventoryLot{
+			TenantID:   tenantID,
+			ProductID:  productOID,
+			ReceivedAt: receivedAt,
+			Quantity:   qty,
+			Remaining:  qty,
+			UnitEkEUR:  ek,
+			Source:     "import",
+			Notes:      notes,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		if _, iErr := h.db.InventoryLots().InsertOne(r.Context(), lot); iErr != nil {
+			errors = append(errors, fmt.Sprintf("Zeile %d: DB-Fehler %v", lineNum, iErr))
+			continue
+		}
+		// Also update product.lastEk with import value
+		h.db.Products().UpdateOne(r.Context(), //nolint
+			bson.M{"_id": productOID, "tenantId": tenantID},
+			bson.M{"$set": bson.M{"lastEk": ek, "lastEkDate": receivedAt, "updatedAt": now}})
+		imported++
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"imported": imported, "errors": errors})
+}
+
+// exportInventoryValuation exports the current stock valuation as CSV.
+//
+// GET /inventory/export?method=fifo|lifo|weighted_avg
+func (h *ProcurementHandler) exportInventoryValuation(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	method := r.URL.Query().Get("method")
+	if method == "" {
+		method = "fifo"
+	}
+
+	// Fetch all lots with remaining > 0
+	cursor, err := h.db.InventoryLots().Find(r.Context(),
+		bson.M{"tenantId": tenantID, "remaining": bson.M{"$gt": 0}},
+		options.Find().SetSort(bson.D{{Key: "productId", Value: 1}, {Key: "receivedAt", Value: 1}}))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	var lots []models.InventoryLot
+	cursor.All(r.Context(), &lots) //nolint
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"lagerbewertung-%s-%s.csv\"",
+		method, time.Now().Format("2006-01-02")))
+	fmt.Fprintf(w, "produktId,menge,ek_eur,gesamt_eur,wareneingangsdatum,quelle,methode\n")
+	for _, lot := range lots {
+		fmt.Fprintf(w, "%s,%d,%.4f,%.4f,%s,%s,%s\n",
+			lot.ProductID.Hex(),
+			lot.Remaining,
+			lot.UnitEkEUR,
+			float64(lot.Remaining)*lot.UnitEkEUR,
+			lot.ReceivedAt.Format("2006-01-02"),
+			lot.Source,
+			method,
+		)
+	}
+}
+
+// splitCSV splits a CSV line respecting simple quoting (no embedded newlines).
+func splitCSV(line string) []string {
+	var parts []string
+	var cur strings.Builder
+	inQuote := false
+	for _, ch := range line {
+		switch {
+		case ch == '"':
+			inQuote = !inQuote
+		case ch == ',' && !inQuote:
+			parts = append(parts, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteRune(ch)
+		}
+	}
+	parts = append(parts, cur.String())
+	return parts
 }
 
 // ---------------------------------------------------------------------------

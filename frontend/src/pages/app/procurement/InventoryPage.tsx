@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, ArrowDownToLine, ArrowUpFromLine, BarChart3 } from 'lucide-react';
+import { Plus, Trash2, ArrowDownToLine, ArrowUpFromLine, BarChart3, Upload, Download, Scale } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  stockApi, productsApi, ordersApi, customersApi,
-  type StockMovement, type StockLevel, type Product,
+  stockApi, productsApi, ordersApi, customersApi, inventoryLotsApi,
+  type StockMovement, type StockLevel, type Product, type InventoryLot,
 } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
 import { Pagination } from '../../../components/Pagination';
@@ -14,7 +14,7 @@ import { useLocalStorage } from '../../../hooks/useLocalStorage';
 const inputCls = 'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm focus:outline-none focus:border-primary-500';
 const labelCls = 'block text-xs text-dark-400 mb-1';
 
-type Tab = 'receipt' | 'issue' | 'levels';
+type Tab = 'receipt' | 'issue' | 'levels' | 'valuation';
 
 const typeLabel: Record<string, { label: string; color: string; icon: typeof ArrowDownToLine }> = {
   receipt:    { label: 'Wareneingang', color: 'text-emerald-400 bg-emerald-500/20', icon: ArrowDownToLine },
@@ -36,6 +36,30 @@ export default function InventoryPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Partial<StockMovement>>(emptyForm('receipt'));
   const [productSearch, setProductSearch] = useState('');
+  const [valuationMethod, setValuationMethod] = useState<'fifo' | 'lifo' | 'weighted_avg'>('fifo');
+  const importFileRef = useRef<HTMLInputElement>(null);
+
+  const importMut = useMutation({
+    mutationFn: (file: File) => inventoryLotsApi.import(file),
+    onSuccess: (res) => {
+      const d = res.data;
+      qc.invalidateQueries({ queryKey: ['inventory-lots'] });
+      qc.invalidateQueries({ queryKey: ['stock-levels'] });
+      toast.success(`${d.imported} Lose importiert${d.errors.length > 0 ? ` (${d.errors.length} Fehler)` : ''}`);
+      if (d.errors.length > 0) d.errors.forEach(e => toast.error(e));
+    },
+    onError: () => toast.error('Import fehlgeschlagen'),
+  });
+
+  const { data: allLots } = useQuery({
+    queryKey: ['inventory-lots-all'],
+    queryFn: async () => {
+      // We don't have a global lots endpoint — fetch per-level product
+      return [] as InventoryLot[];
+    },
+    enabled: false,
+  });
+  void allLots;
 
   const { data: levels, isLoading: loadingLevels } = useQuery({
     queryKey: ['stock-levels', page, limit],
@@ -140,6 +164,9 @@ export default function InventoryPage() {
         </button>
         <button className={tabCls('issue')} onClick={() => { setTab('issue'); setPage(1); }}>
           <span className="flex items-center gap-1.5"><ArrowUpFromLine className="w-4 h-4" />Warenausgang</span>
+        </button>
+        <button className={tabCls('valuation')} onClick={() => setTab('valuation')}>
+          <span className="flex items-center gap-1.5"><Scale className="w-4 h-4" />Lagerbewertung</span>
         </button>
         {(tab === 'receipt' || tab === 'issue') && (
           <button onClick={() => openForm(tab)}
@@ -328,6 +355,82 @@ export default function InventoryPage() {
           )}
           <Pagination page={page} pages={movements?.pages ?? 1} total={total} limit={limit}
             onPage={setPage} onLimit={l => { setLimit(l); setPage(1); }} />
+        </div>
+      )}
+
+      {/* Lagerbewertung tab */}
+      {tab === 'valuation' && (
+        <div className="space-y-6">
+          {/* Bestandsübernahme / Import */}
+          <div className="bg-dark-900 border border-dark-700 rounded-xl p-5 space-y-4">
+            <h2 className="text-base font-semibold text-white">Bestandsübernahme (CSV-Import)</h2>
+            <p className="text-sm text-dark-400">
+              Importiere bestehende Lagerlose mit EK-Preis. CSV-Format:
+              <code className="ml-1 text-xs bg-dark-800 px-1.5 py-0.5 rounded font-mono text-primary-300">
+                produktId,menge,ek_eur,datum,notizen
+              </code>
+            </p>
+            <div className="flex items-center gap-3">
+              <input
+                ref={importFileRef}
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={e => {
+                  const f = e.target.files?.[0];
+                  if (f) importMut.mutate(f);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                onClick={() => importFileRef.current?.click()}
+                disabled={importMut.isPending}
+                className="flex items-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50 text-sm"
+              >
+                <Upload className="w-4 h-4" />
+                {importMut.isPending ? 'Importiere...' : 'CSV hochladen'}
+              </button>
+            </div>
+          </div>
+
+          {/* Export Lagerbewertung */}
+          <div className="bg-dark-900 border border-dark-700 rounded-xl p-5 space-y-4">
+            <h2 className="text-base font-semibold text-white">Lagerbewertung exportieren</h2>
+            <p className="text-sm text-dark-400">
+              Exportiert alle offenen Lagerlose mit Bewertung nach der gewählten Methode.
+              Gesetzliche Hinweise: LIFO nur HGB-konform (nicht IFRS). Empfehlung: Gleitender Durchschnitt oder FIFO.
+            </p>
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex gap-2">
+                {(['fifo', 'lifo', 'weighted_avg'] as const).map(m => (
+                  <button key={m} onClick={() => setValuationMethod(m)}
+                    className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${valuationMethod === m
+                      ? 'border-primary-500 bg-primary-500/20 text-primary-400'
+                      : 'border-dark-700 text-dark-400 hover:text-white hover:border-dark-500'}`}>
+                    {m === 'fifo' ? 'FIFO' : m === 'lifo' ? 'LIFO' : 'Gleit. Ø'}
+                  </button>
+                ))}
+              </div>
+              <a
+                href={inventoryLotsApi.exportUrl(valuationMethod)}
+                download
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 text-sm"
+              >
+                <Download className="w-4 h-4" />
+                Als CSV exportieren
+              </a>
+            </div>
+            <div className="mt-2 p-3 bg-dark-800/50 rounded-lg">
+              <p className="text-xs text-dark-400 font-medium mb-1">Bewertungsverfahren nach deutschem Recht:</p>
+              <ul className="text-xs text-dark-500 space-y-0.5 list-disc list-inside">
+                <li><span className="text-dark-300">FIFO</span> — HGB §256, IFRS (IAS 2), EStG — <span className="text-emerald-400">universell zulässig</span></li>
+                <li><span className="text-dark-300">LIFO</span> — HGB §256, EStG §6 Abs. 1 Nr. 2a — <span className="text-amber-400">nicht IFRS-konform</span></li>
+                <li><span className="text-dark-300">Gleitender Ø</span> — HGB §256, IFRS, EStG — <span className="text-emerald-400">universell zulässig, praktischste Methode</span></li>
+                <li className="text-dark-500 mt-1">Niederstwertprinzip (§253 HGB): Bei Marktpreis &lt; EK muss abgewertet werden.</li>
+                <li className="text-dark-500">Stetigkeit (§252 HGB): Gewähltes Verfahren muss beibehalten werden; Wechsel ist begründungspflichtig.</li>
+              </ul>
+            </div>
+          </div>
         </div>
       )}
     </div>

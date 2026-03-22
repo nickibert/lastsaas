@@ -201,7 +201,10 @@ export default function OrderDetailPage() {
   const orderProducts: OrderProduct[] = (draft.products as OrderProduct[]) ?? [];
 
   const addProduct = () => {
-    const p: OrderProduct = { productId: '', quantity: 1, unitPriceUsd: 0, totalPriceUsd: 0, lengthMm: 0, widthMm: 0, heightMm: 0, volumeM3: 0, weightKg: 0, credited: false, inventoryChecked: false };
+    // Pre-assign to first container when exactly one exists
+    const freights = (draft.freights ?? []) as OrderFreight[];
+    const freightIndex = freights.length === 1 ? 0 : undefined;
+    const p: OrderProduct = { productId: '', quantity: 1, unitPriceUsd: 0, totalPriceUsd: 0, lengthMm: 0, widthMm: 0, heightMm: 0, volumeM3: 0, weightKg: 0, credited: false, inventoryChecked: false, freightIndex };
     setDraft(d => ({ ...d, products: [...(d.products ?? []), p] }));
   };
 
@@ -272,35 +275,70 @@ export default function OrderDetailPage() {
     const warenwertUSD = orderSumUSD - discount;
     const warenwertEUR = dollarRateAvg > 0 ? warenwertUSD / dollarRateAvg : 0;
 
-    // Sum freight costs across all containers
+    // Per-container freight EUR (mirrors backend freightCostEUR)
+    const containerFreightEUR = orderFreights.map(f => {
+      const fRate = (f.dollarRate ?? 0) > 0 ? (f.dollarRate ?? 0) : dollarRateAvg;
+      const seaUSD = (f.seaFreightUsd ?? 0) + (f.emergencyBunkerSurchargeUsd ?? 0) +
+        (f.peakSeasonSurchargeUsd ?? 0) + (f.suezCanalAddonUsd ?? 0) + (f.dangerPayUsd ?? 0);
+      const frtEUR = (f.freightageEur ?? 0) > 0 ? (f.freightageEur ?? 0) : (f.preFreightageEur ?? 0);
+      return frtEUR + seaUSD * fRate +
+        (f.thcEur ?? 0) + (f.ispsEur ?? 0) + (f.blDocFeeEur ?? 0) + (f.followUpFeesEur ?? 0) +
+        (f.customsClearanceEur ?? 0) + (f.customsEur ?? 0);
+    });
+    const totalFreightEUR = containerFreightEUR.reduce((s, v) => s + v, 0);
+    // Summary values for display
     let totalSeaUSD = 0, seaFreightEUR = 0, freightageEUR = 0, portFeesEUR = 0, customsEUR = 0;
     for (const f of orderFreights) {
       const fRate = (f.dollarRate ?? 0) > 0 ? (f.dollarRate ?? 0) : dollarRateAvg;
       const seaUSD = (f.seaFreightUsd ?? 0) + (f.emergencyBunkerSurchargeUsd ?? 0) +
         (f.peakSeasonSurchargeUsd ?? 0) + (f.suezCanalAddonUsd ?? 0) + (f.dangerPayUsd ?? 0);
       totalSeaUSD += seaUSD;
-      seaFreightEUR += fRate > 0 ? seaUSD / fRate : 0;
+      seaFreightEUR += fRate > 0 ? seaUSD * fRate : 0;
       freightageEUR += (f.freightageEur ?? 0) > 0 ? (f.freightageEur ?? 0) : (f.preFreightageEur ?? 0);
       portFeesEUR += (f.thcEur ?? 0) + (f.ispsEur ?? 0) + (f.blDocFeeEur ?? 0) + (f.followUpFeesEur ?? 0);
       customsEUR += (f.customsClearanceEur ?? 0) + (f.customsEur ?? 0);
     }
-    const totalFreightEUR = freightageEUR + seaFreightEUR + portFeesEUR + customsEUR;
 
     const permille = draft.transportInsurancePermille ?? 0;
 
     const products = (draft.products ?? []) as OrderProduct[];
+
+    // Per-container volume + quantity pools (mirrors backend logic)
+    const cVol = new Array<number>(orderFreights.length).fill(0);
+    const cQty = new Array<number>(orderFreights.length).fill(0);
+    let unassignedVol = 0, unassignedQty = 0;
+    for (const p of products) {
+      if (p.freightIndex !== undefined && p.freightIndex >= 0 && p.freightIndex < orderFreights.length) {
+        cVol[p.freightIndex] += p.volumeM3 * p.quantity;
+        cQty[p.freightIndex] += p.quantity;
+      } else {
+        unassignedVol += p.volumeM3 * p.quantity;
+        unassignedQty += p.quantity;
+      }
+    }
     const totalVolumeM3 = products.reduce((s, p) => s + p.volumeM3 * p.quantity, 0);
     const totalQuantity = products.reduce((s, p) => s + p.quantity, 0);
-    const hasAllVolumes = products.every(p => p.volumeM3 > 0);
 
     const rows = products.map(p => {
+      let relevantFreightEUR: number;
+      let volumePool: number;
+      let qtyPool: number;
+      if (p.freightIndex !== undefined && p.freightIndex >= 0 && p.freightIndex < orderFreights.length) {
+        relevantFreightEUR = containerFreightEUR[p.freightIndex];
+        volumePool = cVol[p.freightIndex];
+        qtyPool = cQty[p.freightIndex];
+      } else {
+        relevantFreightEUR = totalFreightEUR;
+        volumePool = unassignedVol;
+        qtyPool = unassignedQty;
+      }
       const prodVolume = p.volumeM3 * p.quantity;
-      const volumeFactor = (totalVolumeM3 > 0 && hasAllVolumes)
-        ? prodVolume / totalVolumeM3
-        : (totalQuantity > 0 ? p.quantity / totalQuantity : 0);
+      const volumeFactor = volumePool > 0
+        ? prodVolume / volumePool
+        : (qtyPool > 0 ? p.quantity / qtyPool : 0);
       const priceFactor = orderSumUSD > 0 ? p.unitPriceUsd / orderSumUSD : 0;
 
-      const freightShare = totalFreightEUR * volumeFactor;
+      const freightShare = relevantFreightEUR * volumeFactor;
       const feesShare = totalPaymentFees * priceFactor;
       const wbk = (freightShare + feesShare) * (1000 + permille) / 1000;
 
@@ -311,7 +349,7 @@ export default function OrderDetailPage() {
         ? wbk / p.quantity + (p.unitPriceUsd - productDiscount) / dollarRateAvg
         : 0;
 
-      return { productId: p.productId, quantity: p.quantity, unitPriceUsd: p.unitPriceUsd, volumeM3: p.volumeM3, volumeFactor, freightShare, feesShare, wbk, unitEkEUR };
+      return { productId: p.productId, quantity: p.quantity, unitPriceUsd: p.unitPriceUsd, volumeM3: p.volumeM3, freightIndex: p.freightIndex, volumeFactor, freightShare, feesShare, wbk, unitEkEUR };
     });
 
     const totalWBK = rows.reduce((s, r) => s + r.wbk, 0);
@@ -431,6 +469,9 @@ export default function OrderDetailPage() {
                 <th className="text-right py-2 pr-3 text-dark-400 font-medium w-20">Menge</th>
                 <th className="text-right py-2 pr-3 text-dark-400 font-medium w-28">EK-Preis USD</th>
                 <th className="text-right py-2 pr-3 text-dark-400 font-medium w-28">Gesamt USD</th>
+                {orderFreights.length > 0 && (
+                  <th className="text-center py-2 pr-3 text-dark-400 font-medium w-28">Container</th>
+                )}
                 <th className="text-right py-2 pr-3 text-dark-400 font-medium w-20">L (mm)</th>
                 <th className="text-right py-2 pr-3 text-dark-400 font-medium w-20">B (mm)</th>
                 <th className="text-right py-2 pr-3 text-dark-400 font-medium w-20">H (mm)</th>
@@ -441,7 +482,7 @@ export default function OrderDetailPage() {
             </thead>
             <tbody className="divide-y divide-dark-800/50">
               {orderProducts.length === 0 && (
-                <tr><td colSpan={10} className="py-4 text-center text-dark-500">Keine Positionen</td></tr>
+                <tr><td colSpan={orderFreights.length > 0 ? 11 : 10} className="py-4 text-center text-dark-500">Keine Positionen</td></tr>
               )}
               {orderProducts.map((op, idx) => (
                 <tr key={idx} className="hover:bg-dark-800/20">
@@ -478,6 +519,22 @@ export default function OrderDetailPage() {
                   <td className="py-2 pr-3 text-right text-dark-300 font-mono text-sm">
                     {op.totalPriceUsd.toLocaleString('de-DE', { minimumFractionDigits: 2 })}
                   </td>
+                  {orderFreights.length > 0 && (
+                    <td className="py-2 pr-3">
+                      <select
+                        value={op.freightIndex !== undefined ? String(op.freightIndex) : ''}
+                        onChange={e => updateProduct(idx, 'freightIndex', e.target.value === '' ? undefined : parseInt(e.target.value))}
+                        className="w-full px-2 py-1 bg-dark-800 border border-dark-700 rounded text-white text-sm focus:outline-none focus:border-primary-500"
+                      >
+                        <option value="">Alle</option>
+                        {orderFreights.map((f, fi) => (
+                          <option key={fi} value={fi}>
+                            {f.containerNr ? f.containerNr : `Container ${fi + 1}`}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  )}
                   {(['lengthMm', 'widthMm', 'heightMm'] as const).map(dim => (
                     <td key={dim} className="py-2 pr-3">
                       <input type="number" step="1" value={op[dim]}
@@ -720,6 +777,9 @@ export default function OrderDetailPage() {
                       <thead>
                         <tr className="border-b border-dark-700">
                           <th className="text-left py-1.5 pr-2 text-dark-400 font-medium">Produkt</th>
+                          {orderFreights.length > 1 && (
+                            <th className="text-center py-1.5 pr-2 text-dark-400 font-medium">Container</th>
+                          )}
                           <th className="text-right py-1.5 pr-2 text-dark-400 font-medium">Vol. m³</th>
                           <th className="text-right py-1.5 pr-2 text-dark-400 font-medium">Anteil</th>
                           <th className="text-right py-1.5 pr-2 text-dark-400 font-medium">Fracht/Stk.</th>
@@ -727,25 +787,35 @@ export default function OrderDetailPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-dark-800/50">
-                        {calcEK.rows.map((row, i) => (
-                          <tr key={i} className="hover:bg-dark-800/20">
-                            <td className="py-1.5 pr-2 text-dark-300 font-mono">
-                              {productNames[row.productId] ?? row.productId.slice(-6)}
-                            </td>
-                            <td className="py-1.5 pr-2 text-right text-dark-400 font-mono">
-                              {row.volumeM3.toFixed(4)}
-                            </td>
-                            <td className="py-1.5 pr-2 text-right text-dark-400 font-mono">
-                              {(row.volumeFactor * 100).toFixed(1)}%
-                            </td>
-                            <td className="py-1.5 pr-2 text-right text-dark-400 font-mono">
-                              {(row.wbk / row.quantity).toFixed(4)}
-                            </td>
-                            <td className="py-1.5 text-right font-medium font-mono text-primary-400">
-                              {row.unitEkEUR.toFixed(4)}
-                            </td>
-                          </tr>
-                        ))}
+                        {calcEK.rows.map((row, i) => {
+                          const containerLabel = row.freightIndex !== undefined
+                            ? (orderFreights[row.freightIndex]?.containerNr || `Container ${row.freightIndex + 1}`)
+                            : 'Alle';
+                          return (
+                            <tr key={i} className="hover:bg-dark-800/20">
+                              <td className="py-1.5 pr-2 text-dark-300 font-mono">
+                                {productNames[row.productId] ?? row.productId.slice(-6)}
+                              </td>
+                              {orderFreights.length > 1 && (
+                                <td className="py-1.5 pr-2 text-center text-dark-400 text-xs">
+                                  {containerLabel}
+                                </td>
+                              )}
+                              <td className="py-1.5 pr-2 text-right text-dark-400 font-mono">
+                                {row.volumeM3.toFixed(4)}
+                              </td>
+                              <td className="py-1.5 pr-2 text-right text-dark-400 font-mono">
+                                {(row.volumeFactor * 100).toFixed(1)}%
+                              </td>
+                              <td className="py-1.5 pr-2 text-right text-dark-400 font-mono">
+                                {(row.wbk / row.quantity).toFixed(4)}
+                              </td>
+                              <td className="py-1.5 text-right font-medium font-mono text-primary-400">
+                                {row.unitEkEUR.toFixed(4)}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

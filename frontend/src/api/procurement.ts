@@ -166,8 +166,36 @@ export interface ProductPriceList {
   validFrom?: string;
   validTo?: string;
   notes?: string;
+  // Provenance (set by applyOrderEK)
+  orderId?: string;
+  freightIndex?: number;
+  quantity?: number;
+  source?: 'order' | 'import' | 'manual';
   createdAt: string;
   updatedAt: string;
+}
+
+export interface InventoryLot {
+  id: string;
+  productId: string;
+  orderId?: string;
+  freightIndex?: number;
+  receivedAt: string;
+  quantity: number;
+  remaining: number;
+  unitEkEur: number;
+  source: 'order' | 'import';
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EkChartPoint {
+  date: string;
+  price: number;
+  quantity: number;
+  freightIndex?: number;
+  source: string;
 }
 
 export interface CalendarTask {
@@ -212,6 +240,8 @@ export interface OrderProduct {
   weightKg: number;
   credited: boolean;
   inventoryChecked: boolean;
+  /** Index into order.freights[]. undefined = costs spread across all containers (legacy). */
+  freightIndex?: number;
 }
 
 export interface OrderFreight {
@@ -464,6 +494,30 @@ export const ordersApi = {
   createPayment: (id: string, data: Partial<OrderPayment>) => api.post<OrderPayment>(`${BASE}/orders/${id}/payments`, data).then(r => r.data),
   updatePayment: (id: string, paymentId: string, data: Partial<OrderPayment>) => api.put(`${BASE}/orders/${id}/payments/${paymentId}`, data),
   deletePayment: (id: string, paymentId: string) => api.delete(`${BASE}/orders/${id}/payments/${paymentId}`),
+};
+
+// EK History / Inventory Lots
+export const ekHistoryApi = {
+  list: (productId: string, from?: string, to?: string) =>
+    api.get<ProductPriceList[]>(`${BASE}/products/${productId}/ek-history`, { params: { from, to } }).then(r => r.data),
+  chart: (productId: string) =>
+    api.get<EkChartPoint[]>(`${BASE}/products/${productId}/ek-history/chart`).then(r => r.data),
+  exportUrl: (productId: string, from?: string, to?: string) => {
+    const p = new URLSearchParams({ format: 'csv', ...(from ? { from } : {}), ...(to ? { to } : {}) });
+    return `${BASE}/products/${productId}/ek-history?${p}`;
+  },
+};
+
+export const inventoryLotsApi = {
+  list: (productId: string) =>
+    api.get<InventoryLot[]>(`${BASE}/products/${productId}/inventory-lots`).then(r => r.data),
+  import: (file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api.post<{ imported: number; errors: string[] }>(`${BASE}/inventory/import`, fd);
+  },
+  exportUrl: (method: 'fifo' | 'lifo' | 'weighted_avg' = 'fifo') =>
+    `${BASE}/inventory/export?method=${method}`,
 };
 
 // Offers

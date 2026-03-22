@@ -3,11 +3,11 @@ import { useHighlightRow } from '../../../hooks/useHighlightRow';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Trash2, Pencil, Tag, X, SlidersHorizontal } from 'lucide-react';
+import { Plus, Search, Trash2, Pencil, Tag, X, SlidersHorizontal, Download, History } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  productsApi, goodsGroupsApi, suppliersApi, productPriceListsApi,
-  type Product, type ProductAttribute, type ProductPriceList,
+  productsApi, goodsGroupsApi, suppliersApi, productPriceListsApi, ekHistoryApi,
+  type Product, type ProductAttribute, type ProductPriceList, type EkChartPoint,
 } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
 import { Pagination } from '../../../components/Pagination';
@@ -15,7 +15,7 @@ import { Pagination } from '../../../components/Pagination';
 const inputCls = 'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm focus:outline-none focus:border-primary-500';
 const labelCls = 'block text-xs text-dark-400 mb-1';
 
-type FormTab = 'grunddaten' | 'tags' | 'preislisten';
+type FormTab = 'grunddaten' | 'tags' | 'preislisten' | 'ek-history';
 
 function TagInput({ tags, onChange }: { tags: string[]; onChange: (t: string[]) => void }) {
   const [input, setInput] = useState('');
@@ -225,6 +225,101 @@ function PriceListSection({ productId }: { productId: string }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// EK History section (per product)
+// ---------------------------------------------------------------------------
+function EkHistorySection({ productId }: { productId: string }) {
+  const { data: history = [] } = useQuery<EkChartPoint[]>({
+    queryKey: ['ek-history-chart', productId],
+    queryFn: () => ekHistoryApi.chart(productId),
+  });
+
+  const exportUrl = ekHistoryApi.exportUrl(productId);
+
+  if (history.length === 0) {
+    return (
+      <p className="text-dark-500 text-sm py-4">
+        Keine EK-Historie vorhanden. EK-Preise werden nach "EK-Preise übernehmen" in einer Bestellung gespeichert.
+      </p>
+    );
+  }
+
+  const minEk = Math.min(...history.map(p => p.price));
+  const maxEk = Math.max(...history.map(p => p.price));
+  const ekRange = maxEk - minEk || 1;
+  const chartH = 80;
+
+  return (
+    <div className="space-y-4">
+      {/* Simple SVG sparkline chart */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-xs font-medium text-dark-400 uppercase tracking-wide">EK-Verlauf (EUR/Stk.)</h3>
+          <a href={exportUrl} download className="flex items-center gap-1 text-xs text-dark-400 hover:text-primary-400">
+            <Download className="w-3 h-3" /> CSV
+          </a>
+        </div>
+        <svg viewBox={`0 0 ${history.length * 40} ${chartH + 20}`} className="w-full h-24 overflow-visible">
+          <polyline
+            fill="none"
+            stroke="rgb(99,102,241)"
+            strokeWidth="2"
+            points={history.map((p, i) => {
+              const x = i * 40 + 20;
+              const y = chartH - ((p.price - minEk) / ekRange) * (chartH - 10) - 5;
+              return `${x},${y}`;
+            }).join(' ')}
+          />
+          {history.map((p, i) => {
+            const x = i * 40 + 20;
+            const y = chartH - ((p.price - minEk) / ekRange) * (chartH - 10) - 5;
+            return (
+              <g key={i}>
+                <circle cx={x} cy={y} r={3} fill="rgb(99,102,241)" />
+                <text x={x} y={chartH + 14} textAnchor="middle" fontSize="8" fill="#6b7280">
+                  {p.date?.slice(2, 10) ?? ''}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="border-b border-dark-700">
+            <tr>
+              <th className="text-left py-1.5 pr-3 text-dark-400 font-medium">Datum</th>
+              <th className="text-right py-1.5 pr-3 text-dark-400 font-medium">EK EUR/Stk.</th>
+              <th className="text-right py-1.5 pr-3 text-dark-400 font-medium">Menge</th>
+              <th className="text-center py-1.5 pr-3 text-dark-400 font-medium">Container</th>
+              <th className="text-center py-1.5 text-dark-400 font-medium">Quelle</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-dark-800/50">
+            {history.map((p, i) => (
+              <tr key={i} className="hover:bg-dark-800/20">
+                <td className="py-1.5 pr-3 text-dark-300 font-mono">{p.date}</td>
+                <td className="py-1.5 pr-3 text-right font-mono font-medium text-primary-400">{p.price.toFixed(4)}</td>
+                <td className="py-1.5 pr-3 text-right text-dark-400">{p.quantity}</td>
+                <td className="py-1.5 pr-3 text-center text-dark-500">
+                  {p.freightIndex !== undefined ? `Container ${p.freightIndex + 1}` : '—'}
+                </td>
+                <td className="py-1.5 text-center">
+                  <span className={`px-1.5 py-0.5 rounded text-xs ${p.source === 'order' ? 'bg-blue-500/20 text-blue-300' : p.source === 'import' ? 'bg-amber-500/20 text-amber-300' : 'bg-dark-700 text-dark-400'}`}>
+                    {p.source === 'order' ? 'Bestellung' : p.source === 'import' ? 'Import' : p.source}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function ProductsPage() {
   const qc = useQueryClient();
   const { activeTenant } = useTenant();
@@ -405,6 +500,11 @@ export default function ProductsPage() {
             {editing && (
               <button className={tabCls('preislisten')} onClick={() => setTab('preislisten')}>Preislisten</button>
             )}
+            {editing && (
+              <button className={tabCls('ek-history')} onClick={() => setTab('ek-history')}>
+                <span className="flex items-center gap-1.5"><History className="w-3.5 h-3.5" />EK-Historie</span>
+              </button>
+            )}
           </div>
 
           <div className="p-6 space-y-4">
@@ -470,7 +570,11 @@ export default function ProductsPage() {
               <PriceListSection productId={editing.id} />
             )}
 
-            {tab !== 'preislisten' && (
+            {tab === 'ek-history' && editing && (
+              <EkHistorySection productId={editing.id} />
+            )}
+
+            {tab !== 'preislisten' && tab !== 'ek-history' && (
               <div className="flex gap-3 pt-2">
                 <button onClick={submit} disabled={!form.nameShort || createMutation.isPending || updateMutation.isPending}
                   className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50 text-sm">
@@ -480,7 +584,7 @@ export default function ProductsPage() {
                   className="px-4 py-2 bg-dark-700 text-white rounded-lg hover:bg-dark-600 text-sm">Abbrechen</button>
               </div>
             )}
-            {tab === 'preislisten' && (
+            {(tab === 'preislisten' || tab === 'ek-history') && (
               <div className="flex gap-3 pt-2 border-t border-dark-700">
                 <button onClick={() => { setShowForm(false); setEditing(null); resetForm(); }}
                   className="px-4 py-2 bg-dark-700 text-white rounded-lg hover:bg-dark-600 text-sm">Schließen</button>
