@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   calendarApi, calendarEntriesApi, ordersApi,
-  type CalendarTask, type CalendarArrival, type CalendarEntry, type CalendarEntryType,
+  type CalendarTask, type CalendarArrival, type CalendarEntry, type CalendarEntryType, type OrderFreight,
 } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
 
@@ -160,7 +160,7 @@ function FreightDateModal({ arrival, onClose }: FreightDateModalProps) {
   const mut = useMutation({
     mutationFn: async () => {
       const order = await ordersApi.get(arrival.orderId);
-      const freight = { ...(order.freight ?? {}), [field]: date + 'T00:00:00Z' };
+      const freight = { ...(order.freight ?? {}) as OrderFreight, [field]: date + 'T00:00:00Z' };
       await ordersApi.update(arrival.orderId, { ...order, freight });
     },
     onSuccess: () => {
