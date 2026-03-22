@@ -38,14 +38,7 @@ func NewEngine(database *db.MongoDB) *Engine {
 // -------------------------------------------------------------------
 
 func (e *Engine) SyncProducts(ctx context.Context, tenantID primitive.ObjectID, client *Client) models.XentralSyncLog {
-	log := models.XentralSyncLog{
-		ID:        primitive.NewObjectID(),
-		TenantID:  tenantID,
-		Entity:    "products",
-		Status:    "running",
-		StartedAt: time.Now(),
-	}
-	e.db.XentralSyncLogs().InsertOne(ctx, log) //nolint
+	log := e.startLog(ctx, tenantID, "products")
 
 	articles, err := client.ListArticles(ctx)
 	if err != nil {
@@ -157,14 +150,7 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 // -------------------------------------------------------------------
 
 func (e *Engine) SyncCustomers(ctx context.Context, tenantID primitive.ObjectID, client *Client) models.XentralSyncLog {
-	log := models.XentralSyncLog{
-		ID:        primitive.NewObjectID(),
-		TenantID:  tenantID,
-		Entity:    "customers",
-		Status:    "running",
-		StartedAt: time.Now(),
-	}
-	e.db.XentralSyncLogs().InsertOne(ctx, log) //nolint
+	log := e.startLog(ctx, tenantID, "customers")
 
 	customers, err := client.ListCustomers(ctx)
 	if err != nil {
@@ -262,14 +248,7 @@ func (e *Engine) upsertCustomer(ctx context.Context, tenantID primitive.ObjectID
 // -------------------------------------------------------------------
 
 func (e *Engine) SyncSuppliers(ctx context.Context, tenantID primitive.ObjectID, client *Client) models.XentralSyncLog {
-	log := models.XentralSyncLog{
-		ID:        primitive.NewObjectID(),
-		TenantID:  tenantID,
-		Entity:    "suppliers",
-		Status:    "running",
-		StartedAt: time.Now(),
-	}
-	e.db.XentralSyncLogs().InsertOne(ctx, log) //nolint
+	log := e.startLog(ctx, tenantID, "suppliers")
 
 	suppliers, err := client.ListSuppliers(ctx)
 	if err != nil {
@@ -359,14 +338,7 @@ func (e *Engine) upsertSupplier(ctx context.Context, tenantID primitive.ObjectID
 // -------------------------------------------------------------------
 
 func (e *Engine) SyncOrders(ctx context.Context, tenantID primitive.ObjectID, client *Client) models.XentralSyncLog {
-	log := models.XentralSyncLog{
-		ID:        primitive.NewObjectID(),
-		TenantID:  tenantID,
-		Entity:    "orders",
-		Status:    "running",
-		StartedAt: time.Now(),
-	}
-	e.db.XentralSyncLogs().InsertOne(ctx, log) //nolint
+	log := e.startLog(ctx, tenantID, "orders")
 
 	orders, err := client.ListPurchaseOrders(ctx)
 	if err != nil {
@@ -522,14 +494,7 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 // -------------------------------------------------------------------
 
 func (e *Engine) SyncSalesOrders(ctx context.Context, tenantID primitive.ObjectID, client *Client) models.XentralSyncLog {
-	log := models.XentralSyncLog{
-		ID:        primitive.NewObjectID(),
-		TenantID:  tenantID,
-		Entity:    "sales_orders",
-		Status:    "running",
-		StartedAt: time.Now(),
-	}
-	e.db.XentralSyncLogs().InsertOne(ctx, log) //nolint
+	log := e.startLog(ctx, tenantID, "sales_orders")
 
 	orders, err := client.ListSalesOrders(ctx)
 	if err != nil {
@@ -656,14 +621,7 @@ func (e *Engine) upsertSalesOrder(ctx context.Context, tenantID primitive.Object
 // -------------------------------------------------------------------
 
 func (e *Engine) SyncPurchasePrices(ctx context.Context, tenantID primitive.ObjectID, client *Client) models.XentralSyncLog {
-	log := models.XentralSyncLog{
-		ID:        primitive.NewObjectID(),
-		TenantID:  tenantID,
-		Entity:    "purchase_prices",
-		Status:    "running",
-		StartedAt: time.Now(),
-	}
-	e.db.XentralSyncLogs().InsertOne(ctx, log) //nolint
+	log := e.startLog(ctx, tenantID, "purchase_prices")
 
 	prices, err := client.ListPurchasePrices(ctx)
 	if err != nil {
@@ -788,14 +746,7 @@ func (e *Engine) upsertPurchasePrice(ctx context.Context, tenantID primitive.Obj
 // -------------------------------------------------------------------
 
 func (e *Engine) SyncSalesPrices(ctx context.Context, tenantID primitive.ObjectID, client *Client) models.XentralSyncLog {
-	log := models.XentralSyncLog{
-		ID:        primitive.NewObjectID(),
-		TenantID:  tenantID,
-		Entity:    "sales_prices",
-		Status:    "running",
-		StartedAt: time.Now(),
-	}
-	e.db.XentralSyncLogs().InsertOne(ctx, log) //nolint
+	log := e.startLog(ctx, tenantID, "sales_prices")
 
 	prices, err := client.ListSalesPrices(ctx)
 	if err != nil {
@@ -1019,14 +970,7 @@ func (e *Engine) PushOrderToXentral(ctx context.Context, tenantID, orderID primi
 // PushAllOrdersToXentral pushes all orders for the tenant that are not yet in Xentral,
 // and patches those that are. Used for initial setup and scheduled full re-sync.
 func (e *Engine) PushAllOrdersToXentral(ctx context.Context, tenantID primitive.ObjectID, client *Client) models.XentralSyncLog {
-	log := models.XentralSyncLog{
-		ID:        primitive.NewObjectID(),
-		TenantID:  tenantID,
-		Entity:    "push_orders",
-		Status:    "running",
-		StartedAt: time.Now(),
-	}
-	e.db.XentralSyncLogs().InsertOne(ctx, log) //nolint
+	log := e.startLog(ctx, tenantID, "push_orders")
 
 	cursor, err := e.db.Orders().Find(ctx, bson.M{"tenantId": tenantID})
 	if err != nil {
@@ -1208,6 +1152,33 @@ func isDue(last *time.Time, now time.Time, interval time.Duration) bool {
 // -------------------------------------------------------------------
 // Helpers
 // -------------------------------------------------------------------
+
+// startLog marks any pre-existing "running" logs for the given entity+tenant
+// as aborted, then inserts a fresh "running" log and returns it.
+// This ensures stale "running" entries (e.g. from a previously cancelled sync)
+// are always resolved before a new run begins.
+func (e *Engine) startLog(ctx context.Context, tenantID primitive.ObjectID, entity string) models.XentralSyncLog {
+	now := time.Now()
+	writeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	e.db.XentralSyncLogs().UpdateMany(writeCtx, //nolint
+		bson.M{"tenantId": tenantID, "entity": entity, "status": "running"},
+		bson.M{"$set": bson.M{
+			"status":     "error",
+			"errors":     []string{"Abgebrochen (neuer Sync gestartet)"},
+			"finishedAt": now,
+		}},
+	)
+	log := models.XentralSyncLog{
+		ID:        primitive.NewObjectID(),
+		TenantID:  tenantID,
+		Entity:    entity,
+		Status:    "running",
+		StartedAt: now,
+	}
+	e.db.XentralSyncLogs().InsertOne(writeCtx, log) //nolint
+	return log
+}
 
 func (e *Engine) failLog(ctx context.Context, log models.XentralSyncLog, errMsg string) models.XentralSyncLog {
 	now := time.Now()

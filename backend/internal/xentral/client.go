@@ -19,6 +19,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -358,52 +359,69 @@ func (c *Client) PatchProductFreefields(ctx context.Context, xentralArticleID st
 // -------------------------------------------------------------------
 
 func (c *Client) get(ctx context.Context, path string, params url.Values) ([]byte, error) {
-	// Enforce rate limit: wait until minInterval has passed since the last request.
-	c.mu.Lock()
-	if wait := c.minInterval - time.Since(c.lastReqAt); wait > 0 {
-		c.mu.Unlock()
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(wait):
-		}
+	const maxRetries = 3
+	for attempt := 0; ; attempt++ {
+		// Enforce rate limit: wait until minInterval has passed since the last request.
 		c.mu.Lock()
-	}
-	c.lastReqAt = time.Now()
-	c.mu.Unlock()
+		if wait := c.minInterval - time.Since(c.lastReqAt); wait > 0 {
+			c.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(wait):
+			}
+			c.mu.Lock()
+		}
+		c.lastReqAt = time.Now()
+		c.mu.Unlock()
 
-	u := c.baseURL + path
-	if len(params) > 0 {
-		u += "?" + params.Encode()
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, fmt.Errorf("xentral: build request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/json")
+		u := c.baseURL + path
+		if len(params) > 0 {
+			u += "?" + params.Encode()
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, fmt.Errorf("xentral: build request: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+c.token)
+		req.Header.Set("Accept", "application/json")
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("xentral: request %s: %w", path, err)
-	}
-	defer resp.Body.Close()
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("xentral: request %s: %w", path, err)
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("xentral: read body: %w", readErr)
+		}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("xentral: read body: %w", err)
+		if resp.StatusCode == http.StatusUnauthorized {
+			return nil, fmt.Errorf("xentral: unauthorized – check API token")
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			if attempt >= maxRetries {
+				return nil, fmt.Errorf("xentral: rate limit reached (after %d retries)", maxRetries)
+			}
+			// Respect Retry-After header; default to 60 s.
+			retryAfter := 60 * time.Second
+			if s := resp.Header.Get("Retry-After"); s != "" {
+				if secs, err := strconv.Atoi(s); err == nil && secs > 0 {
+					retryAfter = time.Duration(secs) * time.Second
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(retryAfter):
+			}
+			continue
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("xentral: HTTP %d from %s: %s", resp.StatusCode, path, string(body))
+		}
+		return body, nil
 	}
-
-	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("xentral: unauthorized – check API token")
-	}
-	if resp.StatusCode == http.StatusTooManyRequests {
-		return nil, fmt.Errorf("xentral: rate limit reached")
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("xentral: HTTP %d from %s: %s", resp.StatusCode, path, string(body))
-	}
-	return body, nil
 }
 
 // CreatePurchaseOrder creates a new purchase order in Xentral and returns the created ID.
