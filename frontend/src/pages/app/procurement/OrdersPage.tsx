@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { ordersApi, suppliersApi, type Order, type DeliveryStatus, type PaymentStatus, type ReceiptStatus } from '../../../api/procurement';
+import { ordersApi, suppliersApi, type Order, type DeliveryStatus, type PaymentStatus } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
 import { Pagination } from '../../../components/Pagination';
 import { DataTable, type BulkAction, type ColumnDef, type SortDir } from '../../../components/DataTable';
@@ -34,18 +34,6 @@ const paymentLabel: Record<PaymentStatus, string> = {
   deposit_paid: 'Anzahlung',
   fully_paid: 'Bezahlt',
   overdue: 'Überfällig',
-};
-const receiptBadge: Record<ReceiptStatus, string> = {
-  pending: 'bg-dark-700 text-dark-300',
-  partial: 'bg-amber-500/20 text-amber-400',
-  received: 'bg-teal-500/20 text-teal-400',
-  distributed: 'bg-emerald-500/20 text-emerald-400',
-};
-const receiptLabel: Record<ReceiptStatus, string> = {
-  pending: 'Ausstehend',
-  partial: 'Teileingang',
-  received: 'Wareneingang',
-  distributed: 'Eingelagert',
 };
 
 export default function OrdersPage() {

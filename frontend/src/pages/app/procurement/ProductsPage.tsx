@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useHighlightRow } from '../../../hooks/useHighlightRow';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Pencil, Tag, X, SlidersHorizontal, Download, History } from 'lucide-react';

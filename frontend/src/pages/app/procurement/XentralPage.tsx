@@ -128,7 +128,7 @@ export default function XentralPage() {
     }
   };
 
-  const handleSyncEntity = async (entity: 'products' | 'customers' | 'suppliers' | 'orders') => {
+  const handleSyncEntity = async (entity: XentralSyncEntity) => {
     setSyncingEntity(entity);
     try {
       await xentralApi.syncEntity(entity);
