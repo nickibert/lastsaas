@@ -283,8 +283,9 @@ type xList[T any] struct {
 // -------------------------------------------------------------------
 
 // pageSize is the number of records requested per page.
-// Xentral uses bracket-style pagination: page[number] and page[size].
-const pageSize = 100
+// Xentral v1 endpoints accept page[size] between 10 and 50.
+// v3 cursor endpoints tolerate higher values but we keep one constant for simplicity.
+const pageSize = 50
 
 // listPage is the shared helper for fetching one page of any resource.
 func listPage[T any](c *Client, ctx context.Context, path string, pageNum int) ([]T, error) {
@@ -666,23 +667,37 @@ type XPurchasePrice struct {
 }
 
 // XSalesPrice is a sales price entry from Xentral GET /api/v3/salesPrices.
+// The "price" field varies across Xentral versions: it can be a plain float64
+// or a nested object {"amount": "10.50", "currency": "EUR"}.
 type XSalesPrice struct {
-	ID             string        `json:"id"`
-	Article        XPriceProduct `json:"article"`
-	Name           string        `json:"name"`           // price group / list name
-	Price          float64       `json:"price"`
-	Currency       string        `json:"currency"`
-	FromQuantity   float64       `json:"fromQuantity"`
-	ValidFrom      string        `json:"validFrom"`
-	ValidTo        string        `json:"validTo"`
-	// Some Xentral versions nest the price differently:
-	PriceAmount    json.Number   `json:"amount"`         // fallback field
+	ID           string          `json:"id"`
+	Article      XPriceProduct   `json:"article"`
+	Name         string          `json:"name"` // price group / list name
+	Price        json.RawMessage `json:"price"`
+	Currency     string          `json:"currency"`
+	FromQuantity float64         `json:"fromQuantity"`
+	ValidFrom    string          `json:"validFrom"`
+	ValidTo      string          `json:"validTo"`
+	// Some Xentral versions expose the amount at the top level:
+	PriceAmount json.Number `json:"amount"` // fallback field
 }
 
-// ResolvedPrice returns the price, checking the nested amount field as a fallback.
+// ResolvedPrice extracts the numeric price regardless of how Xentral encodes it.
+// Handles: plain float64, {"amount": ..., "currency": ...}, top-level "amount".
 func (p *XSalesPrice) ResolvedPrice() float64 {
-	if p.Price != 0 {
-		return p.Price
+	if len(p.Price) > 0 {
+		var f float64
+		if err := json.Unmarshal(p.Price, &f); err == nil {
+			return f
+		}
+		var obj struct {
+			Amount json.Number `json:"amount"`
+		}
+		if err := json.Unmarshal(p.Price, &obj); err == nil {
+			if f, err := obj.Amount.Float64(); err == nil {
+				return f
+			}
+		}
 	}
 	f, _ := p.PriceAmount.Float64()
 	return f
