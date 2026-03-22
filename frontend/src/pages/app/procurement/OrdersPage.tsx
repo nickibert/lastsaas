@@ -86,11 +86,10 @@ export default function OrdersPage() {
 
   const createMutation = useMutation({
     mutationFn: (data: Partial<Order>) => ordersApi.create(data),
-    onSuccess: () => {
+    onSuccess: (newOrder) => {
       qc.invalidateQueries({ queryKey: ['orders'] });
-      setShowForm(false);
-      setForm({ orderNumber: '', orderDate: new Date().toISOString().slice(0, 10), orderContents: '', orderSumUsd: 0 });
-      toast.success('Bestellung angelegt');
+      toast.success('Bestellung angelegt – Positionen und Kosten können jetzt hinzugefügt werden');
+      navigate('/procurement/orders/' + newOrder.id);
     },
     onError: () => toast.error('Fehler beim Anlegen'),
   });
