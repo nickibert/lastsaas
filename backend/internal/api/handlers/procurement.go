@@ -174,6 +174,9 @@ func (h *ProcurementHandler) RegisterRoutes(r *mux.Router, authMW mux.Middleware
 
 	// Stock levels (Lagerbestand)
 	s.HandleFunc("/stock/levels", h.listStockLevels).Methods(http.MethodGet)
+
+	// Xentral ERP integration
+	NewXentralHandler(h.db, h.syslog).RegisterRoutes(s)
 }
 
 // ---------------------------------------------------------------------------

@@ -27,6 +27,7 @@ import (
 	stripeservice "lastsaas/internal/stripe"
 	"lastsaas/internal/syslog"
 	"lastsaas/internal/telemetry"
+	"lastsaas/internal/xentral"
 	"lastsaas/internal/datadog"
 	"lastsaas/internal/version"
 	"lastsaas/internal/webhooks"
@@ -356,6 +357,7 @@ func main() {
 	pmHandler := handlers.NewPMHandler(database, telemetrySvc, sysLogger)
 	eventDefsHandler := handlers.NewEventDefinitionsHandler(database, sysLogger)
 	procurementHandler := handlers.NewProcurementHandler(database, sysLogger)
+	xentral.RunScheduler(appCtx, database)
 	telemetryHandler := handlers.NewTelemetryHandler(telemetrySvc)
 	apiKeysHandler := handlers.NewAPIKeysHandler(database, emitter, sysLogger)
 	webhooksHandler := handlers.NewWebhooksHandler(database, sysLogger, webhookDispatcher)

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ShoppingCart, Package, Users, Ship, Anchor, Box, Globe, Tag, Gift, CalendarDays, UserCheck, Warehouse, Settings } from 'lucide-react';
+import { ShoppingCart, Package, Users, Ship, Anchor, Box, Globe, Tag, Gift, CalendarDays, UserCheck, Warehouse, Settings, Link2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { ordersApi, productsApi, suppliersApi, freightCarriersApi, harboursApi, containersApi, countriesApi, goodsGroupsApi, offersApi, customersApi, stockApi } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
@@ -115,6 +115,14 @@ export default function ProcurementPage() {
       to: '/procurement/inventory',
       color: 'text-lime-400',
       bg: 'bg-lime-500/20',
+    },
+    {
+      icon: Link2,
+      label: 'Xentral ERP',
+      count: null,
+      to: '/procurement/xentral',
+      color: 'text-primary-400',
+      bg: 'bg-primary-500/10',
     },
     {
       icon: Settings,

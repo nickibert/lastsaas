@@ -551,6 +551,18 @@ func (m *MongoDB) ProcurementTenantConfigs() *mongo.Collection {
 	return m.Database.Collection("procurement_tenant_configs")
 }
 
+func (m *MongoDB) XentralConfigs() *mongo.Collection {
+	return m.Database.Collection("xentral_configs")
+}
+
+func (m *MongoDB) XentralMappings() *mongo.Collection {
+	return m.Database.Collection("xentral_mappings")
+}
+
+func (m *MongoDB) XentralSyncLogs() *mongo.Collection {
+	return m.Database.Collection("xentral_sync_logs")
+}
+
 func (m *MongoDB) CalendarEntries() *mongo.Collection {
 	return m.Database.Collection("calendar_entries")
 }
