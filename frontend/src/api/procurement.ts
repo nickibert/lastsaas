@@ -366,11 +366,10 @@ const normalizeOrderDates = (data: Partial<Order>): Partial<Order> => {
   if (p.orderDate && !p.orderDate.includes('T')) p.orderDate = p.orderDate + 'T00:00:00Z';
   if (p.freight) {
     const f = { ...p.freight };
-    const freightDateFields = ['shippingDate', 'estimatedArrival', 'arrival', 'avisShipperDate'] as const;
-    for (const key of freightDateFields) {
-      const v = f[key];
-      if (v && !v.includes('T')) (f as Record<string, string>)[key] = v + 'T00:00:00Z';
-    }
+    if (f.shippingDate && !f.shippingDate.includes('T')) f.shippingDate = f.shippingDate + 'T00:00:00Z';
+    if (f.estimatedArrival && !f.estimatedArrival.includes('T')) f.estimatedArrival = f.estimatedArrival + 'T00:00:00Z';
+    if (f.arrival && !f.arrival.includes('T')) f.arrival = f.arrival + 'T00:00:00Z';
+    if (f.avisShipperDate && !f.avisShipperDate.includes('T')) f.avisShipperDate = f.avisShipperDate + 'T00:00:00Z';
     p.freight = f;
   }
   return p;
