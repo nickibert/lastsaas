@@ -138,6 +138,18 @@ export interface CalendarArrival {
   supplierName?: string;
 }
 
+export type CalendarEntryType = 'reminder' | 'milestone' | 'appointment' | 'deadline';
+
+export interface CalendarEntry {
+  id: string;
+  title: string;
+  notes?: string;
+  date: string;
+  entryType: CalendarEntryType;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface OrderProduct {
   productId: string;
   quantity: number;
@@ -338,7 +350,14 @@ export const productPriceListsApi = {
 // Calendar
 export const calendarApi = {
   get: (from?: string, to?: string) =>
-    api.get<{ tasks: CalendarTask[]; arrivals: CalendarArrival[] }>(`${BASE}/calendar`, { params: { from, to } }).then(r => r.data),
+    api.get<{ tasks: CalendarTask[]; arrivals: CalendarArrival[]; entries: CalendarEntry[] }>(`${BASE}/calendar`, { params: { from, to } }).then(r => r.data),
+};
+
+// Calendar entries (manual)
+export const calendarEntriesApi = {
+  create: (data: Partial<CalendarEntry>) => api.post<CalendarEntry>(`${BASE}/calendar/entries`, data).then(r => r.data),
+  update: (id: string, data: Partial<CalendarEntry>) => api.put(`${BASE}/calendar/entries/${id}`, data),
+  delete: (id: string) => api.delete(`${BASE}/calendar/entries/${id}`),
 };
 
 // Orders

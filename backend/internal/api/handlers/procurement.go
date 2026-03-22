@@ -128,6 +128,12 @@ func (h *ProcurementHandler) RegisterRoutes(r *mux.Router, authMW mux.Middleware
 	s.HandleFunc("/offers/{id}", h.getOffer).Methods(http.MethodGet)
 	s.HandleFunc("/offers/{id}", h.updateOffer).Methods(http.MethodPut)
 	s.HandleFunc("/offers/{id}", h.deleteOffer).Methods(http.MethodDelete)
+
+	// Calendar entries (manual)
+	s.HandleFunc("/calendar/entries", h.listCalendarEntries).Methods(http.MethodGet)
+	s.HandleFunc("/calendar/entries", h.createCalendarEntry).Methods(http.MethodPost)
+	s.HandleFunc("/calendar/entries/{id}", h.updateCalendarEntry).Methods(http.MethodPut)
+	s.HandleFunc("/calendar/entries/{id}", h.deleteCalendarEntry).Methods(http.MethodDelete)
 }
 
 // ---------------------------------------------------------------------------
@@ -1772,8 +1778,123 @@ func (h *ProcurementHandler) getCalendar(w http.ResponseWriter, r *http.Request)
 		arrivals = append(arrivals, ca)
 	}
 
+	// Fetch manual calendar entries for range
+	entryCursor, err2 := h.db.CalendarEntries().Find(r.Context(), bson.M{
+		"tenantId": tenantID,
+		"date":     bson.M{"$gte": from, "$lt": to},
+	}, options.Find().SetSort(bson.D{{Key: "date", Value: 1}}))
+	entries := make([]models.CalendarEntry, 0)
+	if err2 == nil {
+		entryCursor.All(r.Context(), &entries) //nolint
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"tasks":    tasks,
 		"arrivals": arrivals,
+		"entries":  entries,
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Calendar entries (manual)
+// ---------------------------------------------------------------------------
+
+func (h *ProcurementHandler) listCalendarEntries(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	fromStr := r.URL.Query().Get("from")
+	toStr := r.URL.Query().Get("to")
+	filter := bson.M{"tenantId": tenantID}
+	if fromStr != "" || toStr != "" {
+		dateFilter := bson.M{}
+		if fromStr != "" {
+			if t, err := time.Parse("2006-01-02", fromStr); err == nil {
+				dateFilter["$gte"] = t
+			}
+		}
+		if toStr != "" {
+			if t, err := time.Parse("2006-01-02", toStr); err == nil {
+				dateFilter["$lt"] = t.Add(24 * time.Hour)
+			}
+		}
+		if len(dateFilter) > 0 {
+			filter["date"] = dateFilter
+		}
+	}
+	cursor, err := h.db.CalendarEntries().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "date", Value: 1}}))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	results := make([]models.CalendarEntry, 0)
+	cursor.All(r.Context(), &results) //nolint
+	writeJSON(w, http.StatusOK, results)
+}
+
+func (h *ProcurementHandler) createCalendarEntry(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var doc models.CalendarEntry
+	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	doc.ID = primitive.NewObjectID()
+	doc.TenantID = tenantID
+	doc.CreatedAt = time.Now().UTC()
+	doc.UpdatedAt = doc.CreatedAt
+	if _, err := h.db.CalendarEntries().InsertOne(r.Context(), doc); err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusCreated, doc)
+}
+
+func (h *ProcurementHandler) updateCalendarEntry(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var doc models.CalendarEntry
+	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	h.db.CalendarEntries().UpdateOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID},
+		bson.M{"$set": bson.M{
+			"title":     doc.Title,
+			"notes":     doc.Notes,
+			"date":      doc.Date,
+			"entryType": doc.EntryType,
+			"updatedAt": time.Now().UTC(),
+		}}) //nolint
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *ProcurementHandler) deleteCalendarEntry(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	h.db.CalendarEntries().DeleteOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID}) //nolint
+	w.WriteHeader(http.StatusNoContent)
 }

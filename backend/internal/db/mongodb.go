@@ -522,6 +522,10 @@ func (m *MongoDB) ProductPriceLists() *mongo.Collection {
 	return m.Database.Collection("product_price_lists")
 }
 
+func (m *MongoDB) CalendarEntries() *mongo.Collection {
+	return m.Database.Collection("calendar_entries")
+}
+
 func (m *MongoDB) Orders() *mongo.Collection {
 	return m.Database.Collection("orders")
 }

@@ -361,3 +361,19 @@ type ProcurementFile struct {
 	CreatedAt   time.Time           `json:"createdAt" bson:"createdAt"`
 	UpdatedAt   time.Time           `json:"updatedAt" bson:"updatedAt"`
 }
+
+// ---------------------------------------------------------------------------
+// Calendar entries (manual)
+// ---------------------------------------------------------------------------
+
+type CalendarEntry struct {
+	ID        primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	TenantID  primitive.ObjectID `json:"tenantId" bson:"tenantId" validate:"required"`
+	Title     string             `json:"title" bson:"title" validate:"required,min=1,max=200"`
+	Notes     string             `json:"notes,omitempty" bson:"notes,omitempty" validate:"omitempty,max=1000"`
+	Date      time.Time          `json:"date" bson:"date" validate:"required"`
+	// type: reminder | milestone | appointment | deadline
+	EntryType string `json:"entryType" bson:"entryType" validate:"required,oneof=reminder milestone appointment deadline"`
+	CreatedAt time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt" bson:"updatedAt"`
+}

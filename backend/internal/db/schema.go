@@ -29,6 +29,7 @@ func AllSchemas() []CollectionSchema {
 		containersSchema(),
 		countriesSchema(),
 		productPriceListsSchema(),
+		calendarEntriesSchema(),
 		ordersSchema(),
 		orderTasksSchema(),
 		orderPaymentsSchema(),
@@ -821,6 +822,27 @@ func productPriceListsSchema() CollectionSchema {
 					"price":     bson.M{"bsonType": "double", "minimum": 0},
 					"currency":  bson.M{"bsonType": "string", "minLength": 3, "maxLength": 3},
 					"notes":     bson.M{"bsonType": "string", "maxLength": 500},
+					"createdAt": bson.M{"bsonType": "date"},
+					"updatedAt": bson.M{"bsonType": "date"},
+				},
+			},
+		},
+	}
+}
+
+func calendarEntriesSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "calendar_entries",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"tenantId", "title", "date", "entryType", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"tenantId":  bson.M{"bsonType": "objectId"},
+					"title":     bson.M{"bsonType": "string", "minLength": 1, "maxLength": 200},
+					"notes":     bson.M{"bsonType": "string", "maxLength": 1000},
+					"date":      bson.M{"bsonType": "date"},
+					"entryType": bson.M{"bsonType": "string", "enum": bson.A{"reminder", "milestone", "appointment", "deadline"}},
 					"createdAt": bson.M{"bsonType": "date"},
 					"updatedAt": bson.M{"bsonType": "date"},
 				},
