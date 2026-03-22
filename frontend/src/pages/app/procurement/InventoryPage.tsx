@@ -285,13 +285,18 @@ export default function InventoryPage() {
               </thead>
               <tbody className="divide-y divide-dark-800/50">
                 {items.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-dark-400">Keine Buchungen vorhanden</td></tr>
-                ) : items.map((m: StockMovement) => (
+                  <tr><td colSpan={8} className="px-4 py-8 text-center text-dark-400">Keine Buchungen vorhanden</td></tr>
+                ) : items.map((m: StockMovement) => {
+                  const tl = typeLabel[m.type] ?? typeLabel.receipt;
+                  return (
                     <tr key={m.id} className="hover:bg-dark-800/30">
                       <td className="px-4 py-3 text-dark-300">
                         {new Date(m.movedAt).toLocaleDateString('de-DE')}
                       </td>
                       <td className="px-4 py-3 text-white">{productName(m.productId)}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${tl.color}`}>{tl.label}</span>
+                      </td>
                       <td className={`px-4 py-3 text-right font-mono font-semibold ${m.type === 'issue' ? 'text-red-400' : 'text-emerald-400'}`}>
                         {m.type === 'issue' ? '-' : '+'}{m.quantity.toLocaleString('de-DE', { maximumFractionDigits: 3 })}
                       </td>
@@ -308,7 +313,8 @@ export default function InventoryPage() {
                         </button>
                       </td>
                     </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
