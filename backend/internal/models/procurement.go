@@ -114,6 +114,7 @@ type Product struct {
 	// Pricing
 	LastEK     float64    `json:"lastEk" bson:"lastEk" validate:"min=0"`
 	LastEKDate *time.Time `json:"lastEkDate,omitempty" bson:"lastEkDate,omitempty"`
+	LastVK     float64    `json:"lastVk" bson:"lastVk" validate:"min=0"`
 	// PIM: Tags and structured attributes
 	Tags       []string           `json:"tags,omitempty" bson:"tags,omitempty"`
 	Attributes []ProductAttribute `json:"attributes,omitempty" bson:"attributes,omitempty"`

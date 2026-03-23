@@ -726,6 +726,8 @@ func productsSchema() CollectionSchema {
 					"nameShort": bson.M{"bsonType": "string", "minLength": 1, "maxLength": 45},
 					"ean":       bson.M{"bsonType": "string", "maxLength": 32},
 					"wtn":       bson.M{"bsonType": "string", "maxLength": 30},
+					"lastEk":    bson.M{"bsonType": "double", "minimum": 0},
+					"lastVk":    bson.M{"bsonType": "double", "minimum": 0},
 					"createdAt": bson.M{"bsonType": "date"},
 					"updatedAt": bson.M{"bsonType": "date"},
 				},

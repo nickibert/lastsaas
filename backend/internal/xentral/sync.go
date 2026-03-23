@@ -87,6 +87,7 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 			EAN:       truncate(a.EAN, 32),
 			WeightKg:  a.Weight,
 			LastEK:    a.PurchasePrice,
+			LastVK:    a.SellPrice,
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
@@ -120,10 +121,11 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 		"updatedAt": now,
 	}
 
-	// Fetch current product to check whether EAN / lastEk are already set
+	// Fetch current product to check whether EAN / lastEk / lastVk are already set
 	var existing struct {
 		EAN    string  `bson:"ean"`
 		LastEK float64 `bson:"lastEk"`
+		LastVK float64 `bson:"lastVk"`
 	}
 	_ = e.db.Products().FindOne(ctx, bson.M{"_id": mapping.LocalID}).Decode(&existing)
 
@@ -132,6 +134,9 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 	}
 	if existing.LastEK == 0 && a.PurchasePrice > 0 {
 		setFields["lastEk"] = a.PurchasePrice
+	}
+	if existing.LastVK == 0 && a.SellPrice > 0 {
+		setFields["lastVk"] = a.SellPrice
 	}
 
 	_, _ = e.db.Products().UpdateOne(ctx,
@@ -485,11 +490,15 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 		"currency":    currency,
 		"orderDate":   orderDate,
 		"updatedAt":   now,
-		// Always write products (even empty slice) so previous partial data is corrected.
-		"products": orderProducts,
 	}
 	if supplierID != nil {
 		setFields["supplierId"] = supplierID
+	}
+	// Only overwrite line items when Xentral actually returned some.
+	// If the list endpoint omits lineItems (e.g. large response truncation or API version
+	// differences), we keep whatever we already have rather than wiping existing data.
+	if len(orderProducts) > 0 {
+		setFields["products"] = orderProducts
 	}
 	_, _ = e.db.Orders().UpdateOne(ctx,
 		bson.M{"_id": mapping.LocalID, "tenantId": tenantID},
@@ -714,6 +723,13 @@ func (e *Engine) upsertPurchasePrice(ctx context.Context, tenantID primitive.Obj
 			CreatedAt: now,
 			UpdatedAt: now,
 		})
+		// Also seed Product.lastEK if it is not yet set and this is a base price (qty=0).
+		if xp.Price > 0 && qty == 0 {
+			_, _ = e.db.Products().UpdateOne(ctx,
+				bson.M{"_id": *productID, "tenantId": tenantID, "lastEk": bson.M{"$in": bson.A{nil, 0}}},
+				bson.M{"$set": bson.M{"lastEk": xp.Price, "updatedAt": now}},
+			)
+		}
 		return nil
 	}
 	if err != nil {
@@ -748,6 +764,13 @@ func (e *Engine) upsertPurchasePrice(ctx context.Context, tenantID primitive.Obj
 		bson.M{"_id": mapping.LocalID, "tenantId": tenantID},
 		bson.M{"$set": setFields},
 	)
+	// Keep Product.lastEK in sync with the Xentral base price if it is not yet set.
+	if xp.Price > 0 && qty == 0 {
+		_, _ = e.db.Products().UpdateOne(ctx,
+			bson.M{"_id": *productID, "tenantId": tenantID, "lastEk": bson.M{"$in": bson.A{nil, 0}}},
+			bson.M{"$set": bson.M{"lastEk": xp.Price, "updatedAt": now}},
+		)
+	}
 	return nil
 }
 
