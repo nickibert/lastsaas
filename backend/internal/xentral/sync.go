@@ -345,7 +345,7 @@ func (e *Engine) SyncOrders(ctx context.Context, tenantID primitive.ObjectID, cl
 	}
 
 	for _, o := range orders {
-		if err := e.upsertOrder(ctx, tenantID, o); err != nil {
+		if err := e.upsertOrder(ctx, tenantID, o, client); err != nil {
 			log.Errors = append(log.Errors, fmt.Sprintf("%s: %v", o.ID, err))
 			log.Skipped++
 		} else {
@@ -390,9 +390,14 @@ func (e *Engine) resolveProductID(ctx context.Context, tenantID primitive.Object
 	return &m.LocalID
 }
 
-func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, xo XPurchaseOrder) error {
+func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, xo XPurchaseOrder, client *Client) error {
 	if xo.ID == "" {
 		return nil
+	}
+
+	// Fetch line items via separate endpoint – the v3 list response does not include them.
+	if items, err := client.ListPurchaseOrderLineItems(ctx, xo.ID); err == nil && len(items) > 0 {
+		xo.LineItems = items
 	}
 
 	var mapping models.XentralMapping
@@ -415,8 +420,9 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 		}
 	}
 
-	// Resolve supplier via mapping (requires suppliers sync to have run first)
-	supplierID := e.resolveSupplierID(ctx, tenantID, xo.Supplier.ID)
+	// Resolve supplier via mapping (requires suppliers sync to have run first).
+	// The v3 API stores the supplier as address.id; use ResolvedSupplierID() to handle both formats.
+	supplierID := e.resolveSupplierID(ctx, tenantID, xo.ResolvedSupplierID())
 
 	// Build order products from ALL line items.
 	// ProductID is optional: items imported before the products sync runs still carry
@@ -441,11 +447,9 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 		orderProducts = append(orderProducts, op)
 	}
 
-	currency := xo.Currency
-	if currency == "" {
-		currency = "EUR"
-	}
+	currency := xo.ResolvedCurrency()
 	orderNumber := xo.ResolvedOrderNumber()
+	totalNet := xo.ResolvedTotalNet()
 
 	if err == mongo.ErrNoDocuments {
 		order := models.Order{
@@ -455,7 +459,7 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 			OrderNumber: orderNumber,
 			OrderDate:   orderDate,
 			Currency:    currency,
-			OrderSumUSD: xo.TotalNet,
+			OrderSumUSD: totalNet,
 			Products:    orderProducts,
 			CreatedAt:   now,
 			UpdatedAt:   now,
@@ -480,7 +484,7 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 	}
 
 	setFields := bson.M{
-		"orderSumUsd": xo.TotalNet,
+		"orderSumUsd": totalNet,
 		"currency":    currency,
 		"orderDate":   orderDate,
 		"updatedAt":   now,

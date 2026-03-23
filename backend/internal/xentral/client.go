@@ -203,22 +203,86 @@ func (s *XSupplier) ResolvedCompany() string {
 }
 
 // XPurchaseOrder represents a purchase order (Lieferantenbestellung) from Xentral v3.
+// The actual API response uses documentDate for the date, address.id for the supplier
+// reference, and totals.gross for the total amount. Legacy field names are kept as
+// fallbacks for older API versions.
 type XPurchaseOrder struct {
 	ID             string        `json:"id"`
-	OrderNumber    string        `json:"orderNumber"`
 	DocumentNumber string        `json:"documentNumber"`
+	OrderNumber    string        `json:"orderNumber"`   // fallback
 	Status         string        `json:"status"`
-	Date           string        `json:"date"`
-	OrderDate      string        `json:"orderDate"` // fallback field name
-	Supplier       XPOSupplier   `json:"supplier"`
-	LineItems      []XPOLineItem `json:"lineItems"`
-	TotalNet       float64       `json:"totalNet"`
-	Currency       string        `json:"currency"`
+	DocumentDate   string        `json:"documentDate"`  // primary date field (v3 response)
+	Date           string        `json:"date"`          // fallback
+	OrderDate      string        `json:"orderDate"`     // fallback
+	Address        XPORef        `json:"address"`       // supplier ref: address.id = supplier id
+	Supplier       XPOSupplier   `json:"supplier"`      // fallback for older API versions
+	SupplierNumber string        `json:"supplierNumber"`
+	Totals         XPOTotals     `json:"totals"`        // totals.gross.amount + currency
+	TotalNet       float64       `json:"totalNet"`      // fallback flat field
+	Currency       string        `json:"currency"`      // fallback flat field
+	LineItems      []XPOLineItem `json:"lineItems"`     // populated via separate fetch
 }
 
-// -------------------------------------------------------------------
-// Warehouses / Lagerorte
-// -------------------------------------------------------------------
+// XPOTotals holds the financial totals of a purchase order.
+type XPOTotals struct {
+	Gross XPOAmount `json:"gross"`
+	Net   XPOAmount `json:"net"`
+}
+
+// XPOAmount is a monetary amount returned as a string + currency.
+type XPOAmount struct {
+	Amount   string `json:"amount"`
+	Currency string `json:"currency"`
+}
+
+// ResolvedOrderNumber returns the first non-empty order/document number.
+func (o *XPurchaseOrder) ResolvedOrderNumber() string {
+	if o.DocumentNumber != "" {
+		return o.DocumentNumber
+	}
+	return o.OrderNumber
+}
+
+// ResolvedDate returns the first non-empty date string across known field names.
+func (o *XPurchaseOrder) ResolvedDate() string {
+	for _, d := range []string{o.DocumentDate, o.Date, o.OrderDate} {
+		if d != "" {
+			return d
+		}
+	}
+	return ""
+}
+
+// ResolvedSupplierID returns the supplier/address ID used to look up the local mapping.
+// The v3 API stores the supplier as address.id; older versions use supplier.id.
+func (o *XPurchaseOrder) ResolvedSupplierID() string {
+	if o.Address.ID != "" {
+		return o.Address.ID
+	}
+	return o.Supplier.ID
+}
+
+// ResolvedTotalNet returns the net total amount parsed from whichever field is present.
+func (o *XPurchaseOrder) ResolvedTotalNet() float64 {
+	for _, a := range []string{o.Totals.Net.Amount, o.Totals.Gross.Amount} {
+		if a != "" {
+			if f, err := strconv.ParseFloat(a, 64); err == nil {
+				return f
+			}
+		}
+	}
+	return o.TotalNet
+}
+
+// ResolvedCurrency returns the currency from whichever field is populated.
+func (o *XPurchaseOrder) ResolvedCurrency() string {
+	for _, c := range []string{o.Totals.Net.Currency, o.Totals.Gross.Currency, o.Currency} {
+		if c != "" {
+			return c
+		}
+	}
+	return "EUR"
+}
 
 // XWarehouse represents a Xentral warehouse (Lagerort).
 type XWarehouse struct {
@@ -263,22 +327,6 @@ type XProductStock struct {
 	BestBefore   string `json:"bestBefore"`   // MHD as "YYYY-MM-DD" or empty
 	SerialNumber string `json:"serialNumber"` // Seriennummer
 	BatchNumber  string `json:"batchNumber"`  // Charge
-}
-
-// ResolvedOrderNumber returns the first non-empty order/document number.
-func (o *XPurchaseOrder) ResolvedOrderNumber() string {
-	if o.OrderNumber != "" {
-		return o.OrderNumber
-	}
-	return o.DocumentNumber
-}
-
-// ResolvedDate returns the first non-empty date string.
-func (o *XPurchaseOrder) ResolvedDate() string {
-	if o.Date != "" {
-		return o.Date
-	}
-	return o.OrderDate
 }
 
 type XPOSupplier struct {
@@ -406,6 +454,13 @@ func (c *Client) ListSuppliers(ctx context.Context) ([]XSupplier, error) {
 // in the list response by the v3 API.
 func (c *Client) ListPurchaseOrders(ctx context.Context) ([]XPurchaseOrder, error) {
 	return listAllCursor[XPurchaseOrder](c, ctx, "/api/v3/purchaseOrders")
+}
+
+// ListPurchaseOrderLineItems fetches all line items for a single purchase order.
+// The v3 list endpoint does not include line items inline; they must be fetched separately.
+// Endpoint: GET /api/v3/purchaseOrders/{id}/lineItems
+func (c *Client) ListPurchaseOrderLineItems(ctx context.Context, orderID string) ([]XPOLineItem, error) {
+	return listAllCursor[XPOLineItem](c, ctx, "/api/v3/purchaseOrders/"+orderID+"/lineItems")
 }
 
 // ListSalesOrders fetches all sales orders (Verkaufsaufträge) from Xentral
