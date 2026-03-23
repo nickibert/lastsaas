@@ -142,6 +142,8 @@ type XCustomer struct {
 	ID             string         `json:"id"`
 	CustomerNumber string         `json:"customerNumber"`
 	Company        string         `json:"company"`
+	Name           string         `json:"name"`  // alternative field in some Xentral versions
+	Firma          string         `json:"firma"` // German field name used by some editions
 	FirstName      string         `json:"firstName"`
 	LastName       string         `json:"lastName"`
 	Email          string         `json:"email"`
@@ -149,16 +151,38 @@ type XCustomer struct {
 	Address        XAddress       `json:"address"`
 }
 
+// ResolvedCompany returns the first non-empty company/name field.
+func (c *XCustomer) ResolvedCompany() string {
+	for _, v := range []string{c.Company, c.Name, c.Firma} {
+		if v != "" {
+			return v
+		}
+	}
+	return strings.TrimSpace(c.FirstName + " " + c.LastName)
+}
+
 // XSupplier represents a supplier record from Xentral.
 type XSupplier struct {
 	ID             string   `json:"id"`
 	SupplierNumber string   `json:"supplierNumber"`
 	Company        string   `json:"company"`
+	Name           string   `json:"name"`  // alternative field in some Xentral versions
+	Firma          string   `json:"firma"` // German field name used by some editions
 	FirstName      string   `json:"firstName"`
 	LastName       string   `json:"lastName"`
 	Email          string   `json:"email"`
 	Phone          string   `json:"phone"`
 	Origin         string   `json:"origin"`
+}
+
+// ResolvedCompany returns the first non-empty company/name field.
+func (s *XSupplier) ResolvedCompany() string {
+	for _, v := range []string{s.Company, s.Name, s.Firma} {
+		if v != "" {
+			return v
+		}
+	}
+	return strings.TrimSpace(s.FirstName + " " + s.LastName)
 }
 
 // XPurchaseOrder represents a purchase order (Lieferantenbestellung) from Xentral v3.

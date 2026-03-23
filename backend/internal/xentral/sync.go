@@ -178,12 +178,9 @@ func (e *Engine) upsertCustomer(ctx context.Context, tenantID primitive.ObjectID
 	if xc.ID == "" {
 		return nil
 	}
-	company := xc.Company
+	company := xc.ResolvedCompany()
 	if company == "" {
-		company = strings.TrimSpace(xc.FirstName + " " + xc.LastName)
-	}
-	if company == "" {
-		return nil
+		return fmt.Errorf("no company/name in response")
 	}
 
 	var mapping models.XentralMapping
@@ -276,12 +273,9 @@ func (e *Engine) upsertSupplier(ctx context.Context, tenantID primitive.ObjectID
 	if xs.ID == "" {
 		return nil
 	}
-	company := xs.Company
+	company := xs.ResolvedCompany()
 	if company == "" {
-		company = strings.TrimSpace(xs.FirstName + " " + xs.LastName)
-	}
-	if company == "" {
-		return nil
+		return fmt.Errorf("no company/name in response")
 	}
 
 	var mapping models.XentralMapping
