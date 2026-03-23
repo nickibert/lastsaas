@@ -137,23 +137,31 @@ type XArticle struct {
 	Active        bool    `json:"active"`
 }
 
+// XEntityGeneral is the nested "general" object returned by Xentral v1 for
+// companies (customers, suppliers). Name and address live here.
+type XEntityGeneral struct {
+	Name    string   `json:"name"`
+	Address XAddress `json:"address"`
+}
+
 // XCustomer represents a customer record from Xentral.
 type XCustomer struct {
 	ID             string         `json:"id"`
 	CustomerNumber string         `json:"customerNumber"`
-	Company        string         `json:"company"`
-	Name           string         `json:"name"`  // alternative field in some Xentral versions
-	Firma          string         `json:"firma"` // German field name used by some editions
+	General        XEntityGeneral `json:"general"` // primary: general.name / general.address
+	Company        string         `json:"company"` // flat fallback (older API versions)
+	Name           string         `json:"name"`    // flat fallback
+	Firma          string         `json:"firma"`   // flat fallback
 	FirstName      string         `json:"firstName"`
 	LastName       string         `json:"lastName"`
 	Email          string         `json:"email"`
 	Phone          string         `json:"phone"`
-	Address        XAddress       `json:"address"`
+	Address        XAddress       `json:"address"` // flat fallback
 }
 
 // ResolvedCompany returns the first non-empty company/name field.
 func (c *XCustomer) ResolvedCompany() string {
-	for _, v := range []string{c.Company, c.Name, c.Firma} {
+	for _, v := range []string{c.General.Name, c.Company, c.Name, c.Firma} {
 		if v != "" {
 			return v
 		}
@@ -161,23 +169,32 @@ func (c *XCustomer) ResolvedCompany() string {
 	return strings.TrimSpace(c.FirstName + " " + c.LastName)
 }
 
+// ResolvedAddress returns the address, preferring the nested general.address.
+func (c *XCustomer) ResolvedAddress() XAddress {
+	if c.General.Address.Street != "" || c.General.Address.City != "" {
+		return c.General.Address
+	}
+	return c.Address
+}
+
 // XSupplier represents a supplier record from Xentral.
 type XSupplier struct {
-	ID             string   `json:"id"`
-	SupplierNumber string   `json:"supplierNumber"`
-	Company        string   `json:"company"`
-	Name           string   `json:"name"`  // alternative field in some Xentral versions
-	Firma          string   `json:"firma"` // German field name used by some editions
-	FirstName      string   `json:"firstName"`
-	LastName       string   `json:"lastName"`
-	Email          string   `json:"email"`
-	Phone          string   `json:"phone"`
-	Origin         string   `json:"origin"`
+	ID             string         `json:"id"`
+	SupplierNumber string         `json:"supplierNumber"`
+	General        XEntityGeneral `json:"general"` // primary: general.name / general.address
+	Company        string         `json:"company"` // flat fallback (older API versions)
+	Name           string         `json:"name"`    // flat fallback
+	Firma          string         `json:"firma"`   // flat fallback
+	FirstName      string         `json:"firstName"`
+	LastName       string         `json:"lastName"`
+	Email          string         `json:"email"`
+	Phone          string         `json:"phone"`
+	Origin         string         `json:"origin"`
 }
 
 // ResolvedCompany returns the first non-empty company/name field.
 func (s *XSupplier) ResolvedCompany() string {
-	for _, v := range []string{s.Company, s.Name, s.Firma} {
+	for _, v := range []string{s.General.Name, s.Company, s.Name, s.Firma} {
 		if v != "" {
 			return v
 		}
@@ -285,8 +302,17 @@ type XPOArticle struct {
 type XAddress struct {
 	Street   string `json:"street"`
 	City     string `json:"city"`
-	Postcode string `json:"postcode"`
+	Postcode string `json:"postcode"` // used by some Xentral versions
+	Zip      string `json:"zip"`      // used by others (e.g. general.address.zip)
 	Country  string `json:"country"`
+}
+
+// ResolvedZip returns the first non-empty postcode/zip field.
+func (a *XAddress) ResolvedZip() string {
+	if a.Zip != "" {
+		return a.Zip
+	}
+	return a.Postcode
 }
 
 type XOrderCustomer struct {

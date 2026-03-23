@@ -190,11 +190,12 @@ func (e *Engine) upsertCustomer(ctx context.Context, tenantID primitive.ObjectID
 	}).Decode(&mapping)
 
 	now := time.Now()
+	ra := xc.ResolvedAddress()
 	addr := models.CustomerAddress{
-		Street:  xc.Address.Street,
-		City:    xc.Address.City,
-		Zip:     xc.Address.Postcode,
-		Country: xc.Address.Country,
+		Street:  ra.Street,
+		City:    ra.City,
+		Zip:     ra.ResolvedZip(),
+		Country: ra.Country,
 	}
 
 	if err == mongo.ErrNoDocuments {
