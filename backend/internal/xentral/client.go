@@ -128,22 +128,38 @@ func (s *XentralSettings) ResolvedCompanyName() string {
 // The actual /api/v1/products response uses different field names than legacy versions.
 // Resolver methods handle both formats transparently.
 type XArticle struct {
-	ID               string          `json:"id"`
-	UUID             string          `json:"uuid"`
-	Number           string          `json:"number"`           // v1 API primary article number
-	ArticleNumber    string          `json:"articleNumber"`    // fallback (older API versions)
-	Name             string          `json:"name"`
-	Description      string          `json:"description"`
-	EAN              string          `json:"ean"`
-	PurchasePriceNet XPOAmount       `json:"purchasePriceNet"` // v1: {amount:"9.0000", currency:"EUR"}
-	SalesPriceNet    XPOAmount       `json:"salesPriceNet"`    // v1: {amount:"25.0000", currency:"EUR"}
-	PurchasePrice    float64         `json:"purchasePrice"`    // fallback flat float
-	SellPrice        float64         `json:"sellPrice"`        // fallback flat float
-	Measurements     XArticleMeasure `json:"measurements"`     // v1: {weight:{value:1.1, unit:"kg"}}
-	Weight           float64         `json:"weight"`           // fallback flat float
-	IsDisabled       bool            `json:"isDisabled"`       // v1: true = inactive (inverted)
-	Active           bool            `json:"active"`           // fallback
-	UpdatedAt        string          `json:"updatedAt"`
+	ID               string             `json:"id"`
+	UUID             string             `json:"uuid"`
+	Number           string             `json:"number"`           // v1 API primary article number
+	ArticleNumber    string             `json:"articleNumber"`    // fallback (older API versions)
+	Name             string             `json:"name"`
+	Description      string             `json:"description"`
+	EAN              string             `json:"ean"`
+	PurchasePriceNet XPOAmount          `json:"purchasePriceNet"` // v1: {amount:"9.0000", currency:"EUR"}
+	SalesPriceNet    XPOAmount          `json:"salesPriceNet"`    // v1: {amount:"25.0000", currency:"EUR"}
+	PurchasePrice    float64            `json:"purchasePrice"`    // fallback flat float
+	SellPrice        float64            `json:"sellPrice"`        // fallback flat float
+	Measurements     XArticleMeasure    `json:"measurements"`     // v1: {weight:{value:1.1, unit:"kg"}}
+	Weight           float64            `json:"weight"`           // fallback flat float
+	IsDisabled       bool               `json:"isDisabled"`       // v1: true = inactive (inverted)
+	Active           bool               `json:"active"`           // fallback
+	UpdatedAt        string             `json:"updatedAt"`
+	Tags             []XTag             `json:"tags"`             // article tags (Schlagworte)
+	Characteristics  []XCharacteristic  `json:"characteristics"`  // product properties (Eigenschaften)
+}
+
+// XTag represents a tag attached to a Xentral article.
+type XTag struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// XCharacteristic represents a product attribute (Eigenschaft) in Xentral.
+// Endpoint /api/v1/products returns these as characteristics[].
+type XCharacteristic struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+	Unit  string `json:"unit,omitempty"`
 }
 
 // XArticleMeasure holds physical measurements from the v1 products endpoint.
@@ -387,6 +403,36 @@ type XProductStock struct {
 	BatchNumber  string `json:"batchNumber"`  // Charge
 }
 
+// -------------------------------------------------------------------
+// Product stock summary (official /api/products/:id/stocks, v1-beta)
+// -------------------------------------------------------------------
+
+// XProductStockSummary is the response from GET /api/products/{id}/stocks
+// using Accept: application/vnd.xentral.default.v1-beta+json.
+// It provides aggregated totals and a per-warehouse physical breakdown.
+type XProductStockSummary struct {
+	ID         string                  `json:"id"`
+	Totals     XStockTotals            `json:"totals"`
+	Warehouses []XStockWarehouseEntry  `json:"warehouses"`
+}
+
+// XStockTotals holds aggregated stock quantities across all warehouses.
+type XStockTotals struct {
+	Sellable        float64  `json:"sellable"`
+	Reserved        float64  `json:"reserved"`
+	Physical        float64  `json:"physical"`
+	Pseudo          float64  `json:"pseudo"`
+	Correction      float64  `json:"correction"`
+	OpenSalesOrders float64  `json:"openSalesOrders"`
+	Calculated      float64  `json:"calculated"`
+}
+
+// XStockWarehouseEntry is one row in the warehouses array of XProductStockSummary.
+type XStockWarehouseEntry struct {
+	ID       string  `json:"id"`
+	Physical float64 `json:"physical"`
+}
+
 type XPOSupplier struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -574,6 +620,26 @@ func (c *Client) ListProductStocks(ctx context.Context) ([]XProductStock, error)
 		}
 	}
 	return all, nil
+}
+
+// GetProductStockSummary fetches the stock summary for a single product using the
+// official (v1-beta) endpoint GET /api/products/{id}/stocks.
+// This requires the Accept: application/vnd.xentral.default.v1-beta+json header and
+// returns aggregated totals plus a per-warehouse physical breakdown.
+func (c *Client) GetProductStockSummary(ctx context.Context, xentralProductID string) (*XProductStockSummary, error) {
+	body, _, err := c.do(ctx, "/api/products/"+xentralProductID+"/stocks", nil, map[string]string{
+		"Accept": "application/vnd.xentral.default.v1-beta+json",
+	})
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Data XProductStockSummary `json:"data"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("xentral: decode stocks for product %s: %w", xentralProductID, err)
+	}
+	return &resp.Data, nil
 }
 
 // PatchProductEAN pushes an EAN barcode back to the matching Xentral article.

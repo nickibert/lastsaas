@@ -519,6 +519,14 @@ func (h *XentralHandler) runSync(ctx context.Context, tenantID primitive.ObjectI
 		}
 		log = h.engine.SyncStocks(ctx, tenantID, client)
 		h.db.XentralConfigs().UpdateOne(ctx, bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncStocks": now}}) //nolint
+	case "stocks_per_product":
+		// Uses the official /api/products/:id/stocks (v1-beta) endpoint.
+		// Intended for the initial stock import; requires warehouses to be synced first.
+		if !cfg.SyncStocks {
+			return skippedLog(tenantID, entity)
+		}
+		log = h.engine.SyncStocksPerProduct(ctx, tenantID, client)
+		h.db.XentralConfigs().UpdateOne(ctx, bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncStocks": now}}) //nolint
 	default:
 		return skippedLog(tenantID, entity)
 	}
