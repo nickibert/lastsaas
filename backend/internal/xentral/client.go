@@ -125,16 +125,74 @@ func (s *XentralSettings) ResolvedCompanyName() string {
 }
 
 // XArticle represents a product/article record from Xentral.
+// The actual /api/v1/products response uses different field names than legacy versions.
+// Resolver methods handle both formats transparently.
 type XArticle struct {
-	ID            string  `json:"id"`
-	ArticleNumber string  `json:"articleNumber"`
-	Name          string  `json:"name"`
-	Description   string  `json:"description"`
-	EAN           string  `json:"ean"`
-	PurchasePrice float64 `json:"purchasePrice"`
-	SellPrice     float64 `json:"sellPrice"`
-	Weight        float64 `json:"weight"`
-	Active        bool    `json:"active"`
+	ID               string          `json:"id"`
+	UUID             string          `json:"uuid"`
+	Number           string          `json:"number"`           // v1 API primary article number
+	ArticleNumber    string          `json:"articleNumber"`    // fallback (older API versions)
+	Name             string          `json:"name"`
+	Description      string          `json:"description"`
+	EAN              string          `json:"ean"`
+	PurchasePriceNet XPOAmount       `json:"purchasePriceNet"` // v1: {amount:"9.0000", currency:"EUR"}
+	SalesPriceNet    XPOAmount       `json:"salesPriceNet"`    // v1: {amount:"25.0000", currency:"EUR"}
+	PurchasePrice    float64         `json:"purchasePrice"`    // fallback flat float
+	SellPrice        float64         `json:"sellPrice"`        // fallback flat float
+	Measurements     XArticleMeasure `json:"measurements"`     // v1: {weight:{value:1.1, unit:"kg"}}
+	Weight           float64         `json:"weight"`           // fallback flat float
+	IsDisabled       bool            `json:"isDisabled"`       // v1: true = inactive (inverted)
+	Active           bool            `json:"active"`           // fallback
+	UpdatedAt        string          `json:"updatedAt"`
+}
+
+// XArticleMeasure holds physical measurements from the v1 products endpoint.
+type XArticleMeasure struct {
+	Weight XArticleValue `json:"weight"`
+}
+
+// XArticleValue is a value+unit pair (e.g. weight in kg).
+type XArticleValue struct {
+	Value float64 `json:"value"`
+	Unit  string  `json:"unit"`
+}
+
+// ResolvedArticleNumber returns the article number, preferring the v1 "number" field.
+func (a *XArticle) ResolvedArticleNumber() string {
+	for _, n := range []string{a.Number, a.ArticleNumber} {
+		if n != "" {
+			return n
+		}
+	}
+	return ""
+}
+
+// ResolvedPurchasePrice returns the EK price from whichever field is populated.
+func (a *XArticle) ResolvedPurchasePrice() float64 {
+	if a.PurchasePriceNet.Amount != "" {
+		if f, err := strconv.ParseFloat(a.PurchasePriceNet.Amount, 64); err == nil {
+			return f
+		}
+	}
+	return a.PurchasePrice
+}
+
+// ResolvedSellPrice returns the VK price from whichever field is populated.
+func (a *XArticle) ResolvedSellPrice() float64 {
+	if a.SalesPriceNet.Amount != "" {
+		if f, err := strconv.ParseFloat(a.SalesPriceNet.Amount, 64); err == nil {
+			return f
+		}
+	}
+	return a.SellPrice
+}
+
+// ResolvedWeight returns the weight in kg from whichever field is populated.
+func (a *XArticle) ResolvedWeight() float64 {
+	if a.Measurements.Weight.Value > 0 {
+		return a.Measurements.Weight.Value
+	}
+	return a.Weight
 }
 
 // XEntityGeneral is the nested "general" object returned by Xentral v1 for
@@ -759,16 +817,60 @@ func (c *Client) ListSalesPrices(ctx context.Context) ([]XSalesPrice, error) {
 // -------------------------------------------------------------------
 
 // XPurchasePrice is a purchase price entry from Xentral GET /api/v1/purchasePrices.
+// XPurchasePrice is a purchase price entry from Xentral GET /api/v1/purchasePrices.
+// The actual v1 response encodes "price" as an object: {"amount": 10, "currency": "EUR"}.
+// Use ResolvedPrice() / ResolvedCurrency() instead of accessing Price or Currency directly.
 type XPurchasePrice struct {
-	ID           string         `json:"id"`
-	Product      XPriceProduct  `json:"product"`
-	Supplier     XPriceSupplier `json:"supplier"`
-	Price        float64        `json:"price"`
-	Currency     string         `json:"currency"`
-	FromQuantity float64        `json:"fromQuantity"`
-	ValidFrom    string         `json:"validFrom"`
-	ExpiresAt    string         `json:"expiresAt"`
-	Name         string         `json:"name"` // price list name if provided
+	ID                  string          `json:"id"`
+	Product             XPriceProduct   `json:"product"`
+	Supplier            XPriceSupplier  `json:"supplier"`
+	IsStandardSupplier  bool            `json:"isStandardSupplier"`
+	SupplierDesignation string          `json:"supplierDesignation"`
+	Price               json.RawMessage `json:"price"`    // object {amount, currency} or plain float
+	Currency            string          `json:"currency"` // fallback flat currency
+	FromQuantity        float64         `json:"fromQuantity"`
+	ValidFrom           string          `json:"validFrom"`
+	ExpiresAt           string          `json:"expiresAt"`
+	Name                string          `json:"name"` // price list name if provided
+}
+
+// ResolvedPrice extracts the numeric price regardless of how Xentral encodes it.
+// Handles: plain float64, {"amount": 10, "currency": "EUR"} (number), {"amount": "10.00"} (string).
+func (p *XPurchasePrice) ResolvedPrice() float64 {
+	if len(p.Price) == 0 {
+		return 0
+	}
+	// Plain number
+	var f float64
+	if err := json.Unmarshal(p.Price, &f); err == nil {
+		return f
+	}
+	// Object with amount field (number or string)
+	var obj struct {
+		Amount json.Number `json:"amount"`
+	}
+	if err := json.Unmarshal(p.Price, &obj); err == nil {
+		if f, err := obj.Amount.Float64(); err == nil {
+			return f
+		}
+	}
+	return 0
+}
+
+// ResolvedCurrency returns the currency from the price object or the flat field.
+func (p *XPurchasePrice) ResolvedCurrency() string {
+	if len(p.Price) > 0 {
+		var obj struct {
+			Currency string `json:"currency"`
+		}
+		if err := json.Unmarshal(p.Price, &obj); err == nil && obj.Currency != "" {
+			return obj.Currency
+		}
+	}
+	if p.Currency != "" {
+		return p.Currency
+	}
+	return "EUR"
 }
 
 // XSalesPrice is a sales price entry from Xentral GET /api/v3/salesPrices.

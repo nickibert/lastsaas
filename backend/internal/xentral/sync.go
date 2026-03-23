@@ -71,9 +71,10 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 	}).Decode(&mapping)
 
 	now := time.Now()
+	articleNr := a.ResolvedArticleNumber()
 	nameShort := truncate(a.Name, 45)
 	if nameShort == "" {
-		nameShort = truncate(a.ArticleNumber, 45)
+		nameShort = truncate(articleNr, 45)
 	}
 
 	if err == mongo.ErrNoDocuments {
@@ -84,9 +85,9 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 			NameShort: nameShort,
 			NameLong:  truncate(a.Name, 255),
 			EAN:       truncate(a.EAN, 32),
-			WeightKg:  a.Weight,
-			LastEK:    a.PurchasePrice,
-			LastVK:    a.SellPrice,
+			WeightKg:  a.ResolvedWeight(),
+			LastEK:    a.ResolvedPurchasePrice(),
+			LastVK:    a.ResolvedSellPrice(),
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
@@ -99,7 +100,7 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 			Entity:    "product",
 			LocalID:   product.ID,
 			XentralID: a.ID,
-			XentralNr: a.ArticleNumber,
+			XentralNr: articleNr,
 			CreatedAt: now,
 			UpdatedAt: now,
 		})
@@ -116,7 +117,7 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 	setFields := bson.M{
 		"nameShort": nameShort,
 		"nameLong":  truncate(a.Name, 255),
-		"weightKg":  a.Weight,
+		"weightKg":  a.ResolvedWeight(),
 		"updatedAt": now,
 	}
 
@@ -128,14 +129,16 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 	}
 	_ = e.db.Products().FindOne(ctx, bson.M{"_id": mapping.LocalID}).Decode(&existing)
 
+	purchasePrice := a.ResolvedPurchasePrice()
+	sellPrice := a.ResolvedSellPrice()
 	if existing.EAN == "" && a.EAN != "" {
 		setFields["ean"] = truncate(a.EAN, 32)
 	}
-	if existing.LastEK == 0 && a.PurchasePrice > 0 {
-		setFields["lastEk"] = a.PurchasePrice
+	if existing.LastEK == 0 && purchasePrice > 0 {
+		setFields["lastEk"] = purchasePrice
 	}
-	if existing.LastVK == 0 && a.SellPrice > 0 {
-		setFields["lastVk"] = a.SellPrice
+	if existing.LastVK == 0 && sellPrice > 0 {
+		setFields["lastVk"] = sellPrice
 	}
 
 	_, _ = e.db.Products().UpdateOne(ctx,
@@ -144,7 +147,7 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 	)
 	_, _ = e.db.XentralMappings().UpdateOne(ctx,
 		bson.M{"_id": mapping.ID},
-		bson.M{"$set": bson.M{"xentralNr": a.ArticleNumber, "updatedAt": now}},
+		bson.M{"$set": bson.M{"xentralNr": articleNr, "updatedAt": now}},
 	)
 	return nil
 }
@@ -668,10 +671,7 @@ func (e *Engine) upsertPurchasePrice(ctx context.Context, tenantID primitive.Obj
 
 	supplierID := e.resolveSupplierID(ctx, tenantID, xp.Supplier.ID)
 
-	currency := xp.Currency
-	if currency == "" {
-		currency = "EUR"
-	}
+	currency := xp.ResolvedCurrency()
 	name := xp.Name
 	if name == "" {
 		name = "Xentral EK"
@@ -692,6 +692,8 @@ func (e *Engine) upsertPurchasePrice(ctx context.Context, tenantID primitive.Obj
 		"xentralId": xp.ID,
 	}).Decode(&mapping)
 
+	resolvedPrice := xp.ResolvedPrice()
+
 	if err == mongo.ErrNoDocuments {
 		entry := models.ProductPriceList{
 			ID:         primitive.NewObjectID(),
@@ -700,7 +702,7 @@ func (e *Engine) upsertPurchasePrice(ctx context.Context, tenantID primitive.Obj
 			SupplierID: supplierID,
 			Type:       "EK",
 			Name:       name,
-			Price:      xp.Price,
+			Price:      resolvedPrice,
 			Currency:   currency,
 			Quantity:   qty,
 			ValidFrom:  validFrom,
@@ -722,10 +724,10 @@ func (e *Engine) upsertPurchasePrice(ctx context.Context, tenantID primitive.Obj
 			UpdatedAt: now,
 		})
 		// Also seed Product.lastEK if it is not yet set and this is a base price (qty=0).
-		if xp.Price > 0 && qty == 0 {
+		if resolvedPrice > 0 && qty == 0 {
 			_, _ = e.db.Products().UpdateOne(ctx,
 				bson.M{"_id": *productID, "tenantId": tenantID, "lastEk": bson.M{"$in": bson.A{nil, 0}}},
-				bson.M{"$set": bson.M{"lastEk": xp.Price, "updatedAt": now}},
+				bson.M{"$set": bson.M{"lastEk": resolvedPrice, "updatedAt": now}},
 			)
 		}
 		return nil
@@ -743,7 +745,7 @@ func (e *Engine) upsertPurchasePrice(ctx context.Context, tenantID primitive.Obj
 	}
 
 	setFields := bson.M{
-		"price":     xp.Price,
+		"price":     resolvedPrice,
 		"currency":  currency,
 		"name":      name,
 		"quantity":  qty,
@@ -763,10 +765,10 @@ func (e *Engine) upsertPurchasePrice(ctx context.Context, tenantID primitive.Obj
 		bson.M{"$set": setFields},
 	)
 	// Keep Product.lastEK in sync with the Xentral base price if it is not yet set.
-	if xp.Price > 0 && qty == 0 {
+	if resolvedPrice > 0 && qty == 0 {
 		_, _ = e.db.Products().UpdateOne(ctx,
 			bson.M{"_id": *productID, "tenantId": tenantID, "lastEk": bson.M{"$in": bson.A{nil, 0}}},
-			bson.M{"$set": bson.M{"lastEk": xp.Price, "updatedAt": now}},
+			bson.M{"$set": bson.M{"lastEk": resolvedPrice, "updatedAt": now}},
 		)
 	}
 	return nil
