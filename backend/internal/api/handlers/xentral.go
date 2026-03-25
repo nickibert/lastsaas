@@ -274,8 +274,41 @@ func (h *XentralHandler) triggerSyncAll(w http.ResponseWriter, r *http.Request) 
 	syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
+	// Sync order is determined by data dependencies:
+	//
+	// Phase 1 – Master data (no local dependencies):
+	//   suppliers   → referenced by orders
+	//   customers   → referenced by sales orders
+	//   products    → referenced by prices, stocks, orders
+	//   warehouses  → referenced by stocks_per_product
+	//
+	// Phase 2 – Dependent data (requires phase 1 to be mapped first):
+	//   purchase_prices   → needs products
+	//   sales_prices      → needs products
+	//   orders            → needs products + suppliers
+	//   sales_orders      → needs products + customers
+	//   stocks_per_product → needs products + warehouses (official v1-beta endpoint)
+	//
+	// Phase 3 – Outbound (push our data back to Xentral):
+	//   push_orders       → pushes local orders into Xentral
+	syncOrder := []string{
+		// Phase 1
+		"suppliers",
+		"customers",
+		"products",
+		"warehouses",
+		// Phase 2
+		"purchase_prices",
+		"sales_prices",
+		"orders",
+		"sales_orders",
+		"stocks_per_product",
+		// Phase 3
+		"push_orders",
+	}
+
 	var logs []models.XentralSyncLog
-	for _, entity := range []string{"products", "customers", "suppliers", "orders", "warehouses", "stocks", "sales_orders", "purchase_prices", "sales_prices", "push_orders"} {
+	for _, entity := range syncOrder {
 		log := h.runSync(syncCtx, tenantID, entity, cfg, client)
 		logs = append(logs, log)
 	}
