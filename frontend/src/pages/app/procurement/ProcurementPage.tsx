@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
-import { ShoppingCart, Package, Users, Ship, Anchor, Box, Globe, Tag, Gift, CalendarDays, UserCheck, Warehouse, Settings, Link2 } from 'lucide-react';
+import { ShoppingCart, Package, Users, Ship, Anchor, Box, Globe, Tag, Gift, CalendarDays, UserCheck, Warehouse, MapPin, Settings, Link2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { ordersApi, productsApi, suppliersApi, freightCarriersApi, harboursApi, containersApi, countriesApi, goodsGroupsApi, offersApi, customersApi, stockApi } from '../../../api/procurement';
+import { ordersApi, productsApi, suppliersApi, freightCarriersApi, harboursApi, containersApi, countriesApi, goodsGroupsApi, offersApi, customersApi, stockApi, warehousesApi } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
 
 export default function ProcurementPage() {
@@ -18,6 +18,7 @@ export default function ProcurementPage() {
   const { data: offersData } = useQuery({ queryKey: ['offers', 1, 1], queryFn: () => offersApi.list(undefined, 1, 1), enabled, throwOnError: false });
   const { data: customersData } = useQuery({ queryKey: ['customers', 1, 1], queryFn: () => customersApi.list(undefined, 1, 1), enabled, throwOnError: false });
   const { data: stockData } = useQuery({ queryKey: ['stock-levels', 1, 1], queryFn: () => stockApi.listLevels({ page: 1, limit: 1 }), enabled, throwOnError: false });
+  const { data: warehousesData } = useQuery({ queryKey: ['warehouses', '', '', 1, 1], queryFn: () => warehousesApi.list(undefined, undefined, undefined, 1, 1), enabled, throwOnError: false });
 
   const tiles = [
     {
@@ -111,10 +112,26 @@ export default function ProcurementPage() {
     {
       icon: Warehouse,
       label: 'Lager',
-      count: stockData?.total ?? null,
-      to: '/procurement/inventory',
+      count: warehousesData?.total ?? null,
+      to: '/procurement/warehouses',
       color: 'text-lime-400',
       bg: 'bg-lime-500/20',
+    },
+    {
+      icon: MapPin,
+      label: 'Lagerplätze',
+      count: null,
+      to: '/procurement/storage-locations',
+      color: 'text-lime-300',
+      bg: 'bg-lime-500/10',
+    },
+    {
+      icon: Warehouse,
+      label: 'Lagerbestand',
+      count: stockData?.total ?? null,
+      to: '/procurement/inventory',
+      color: 'text-emerald-400',
+      bg: 'bg-emerald-500/20',
     },
     {
       icon: Link2,

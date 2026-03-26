@@ -99,8 +99,11 @@ export interface Product {
   vpe: number;
   lastEk: number;
   lastEkDate?: string;
+  lastVk: number;
   tags?: string[];
   attributes?: ProductAttribute[];
+  xentralNr?: string;
+  active: boolean;
   userDef01: string;
   userDef02: string;
   userDef03: string;
@@ -379,7 +382,7 @@ const BASE = '/procurement';
 
 // Suppliers
 export const suppliersApi = {
-  list: (page = 1, limit = 25) => api.get<PagedResult<Supplier>>(`${BASE}/suppliers`, { params: { page, limit } }).then(r => r.data),
+  list: (q?: string, page = 1, limit = 25) => api.get<PagedResult<Supplier>>(`${BASE}/suppliers`, { params: { q, page, limit } }).then(r => r.data),
   create: (data: Partial<Supplier>) => api.post<Supplier>(`${BASE}/suppliers`, data).then(r => r.data),
   get: (id: string) => api.get<Supplier>(`${BASE}/suppliers/${id}`).then(r => r.data),
   update: (id: string, data: Partial<Supplier>) => api.put(`${BASE}/suppliers/${id}`, data),
@@ -585,6 +588,51 @@ export const customersApi = {
   get: (id: string) => api.get<Customer>(`${BASE}/customers/${id}`).then(r => r.data),
   update: (id: string, data: Partial<Customer>) => api.put(`${BASE}/customers/${id}`, data),
   delete: (id: string) => api.delete(`${BASE}/customers/${id}`),
+};
+
+// Warehouses (Lager)
+export interface Warehouse {
+  id: string;
+  xentralId?: string;
+  name: string;
+  shortName?: string;
+  description?: string;
+  address?: CustomerAddress;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const warehousesApi = {
+  list: (q?: string, country?: string, active?: boolean, page = 1, limit = 25) =>
+    api.get<PagedResult<Warehouse>>(`${BASE}/warehouses`, { params: { q, country, active, page, limit } }).then(r => r.data),
+  create: (data: Partial<Warehouse>) => api.post<Warehouse>(`${BASE}/warehouses`, data).then(r => r.data),
+  get: (id: string) => api.get<Warehouse>(`${BASE}/warehouses/${id}`).then(r => r.data),
+  update: (id: string, data: Partial<Warehouse>) => api.put(`${BASE}/warehouses/${id}`, data),
+  delete: (id: string) => api.delete(`${BASE}/warehouses/${id}`),
+};
+
+// Storage locations (Lagerplätze)
+export interface StorageLocation {
+  id: string;
+  xentralId?: string;
+  warehouseId: string;
+  name: string;
+  aisle?: string;
+  rack?: string;
+  level?: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const storageLocationsApi = {
+  list: (q?: string, warehouseId?: string, active?: boolean, page = 1, limit = 25) =>
+    api.get<PagedResult<StorageLocation>>(`${BASE}/storage-locations`, { params: { q, warehouseId, active, page, limit } }).then(r => r.data),
+  create: (data: Partial<StorageLocation>) => api.post<StorageLocation>(`${BASE}/storage-locations`, data).then(r => r.data),
+  get: (id: string) => api.get<StorageLocation>(`${BASE}/storage-locations/${id}`).then(r => r.data),
+  update: (id: string, data: Partial<StorageLocation>) => api.put(`${BASE}/storage-locations/${id}`, data),
+  delete: (id: string) => api.delete(`${BASE}/storage-locations/${id}`),
 };
 
 // Stock movements & levels

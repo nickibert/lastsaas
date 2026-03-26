@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useHighlightRow } from '../../../hooks/useHighlightRow';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, Pencil } from 'lucide-react';
+import { Plus, Trash2, Pencil, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { suppliersApi, type Supplier } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
@@ -15,12 +15,13 @@ export default function SuppliersPage() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Supplier | null>(null);
   const [form, setForm] = useState<Partial<Supplier>>({ company: '', firstname: '', lastname: '', email: '', origin: '' });
+  const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useLocalStorage<number>('table_page_size', 25);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['suppliers', page, limit],
-    queryFn: () => suppliersApi.list(page, limit),
+    queryKey: ['suppliers', search, page, limit],
+    queryFn: () => suppliersApi.list(search || undefined, page, limit),
     enabled,
     throwOnError: false,
     placeholderData: prev => prev,
@@ -50,6 +51,8 @@ export default function SuppliersPage() {
 
   const resetForm = () => setForm({ company: '', firstname: '', lastname: '', email: '', origin: '' });
 
+  const handleSearch = (v: string) => { setSearch(v); setPage(1); };
+
   const startEdit = (s: Supplier) => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
     setEditing(s);
@@ -78,6 +81,22 @@ export default function SuppliersPage() {
           <Plus className="w-4 h-4" />
           Lieferant anlegen
         </button>
+      </div>
+
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
+        <input
+          type="text"
+          value={search}
+          onChange={e => handleSearch(e.target.value)}
+          placeholder="Firma, Name oder E-Mail suchen..."
+          className="w-full pl-9 pr-8 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white placeholder:text-dark-500 focus:outline-none focus:border-primary-500"
+        />
+        {search && (
+          <button onClick={() => handleSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-dark-400 hover:text-white">
+            <X className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       {(showForm || editing) && (
