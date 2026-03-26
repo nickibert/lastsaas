@@ -54,10 +54,7 @@ func NewClient(baseURL, token string) *Client {
 func (c *Client) Ping(ctx context.Context) error {
 	// Use the products endpoint as a health check.
 	// Xentral requires page[size] to be between 10 and 150 (string-encoded integer).
-	_, err := c.get(ctx, "/api/v1/products", url.Values{
-		"page[number]": []string{"1"},
-		"page[size]":   []string{"10"},
-	})
+	_, err := c.get(ctx, "/api/v1/products?page[number]=1&page[size]=10", nil)
 	return err
 }
 
@@ -624,11 +621,11 @@ type xList[T any] struct {
 const pageSize = 50
 
 // listPage is the shared helper for fetching one page of any resource.
+// It embeds page[number] and page[size] directly in the path (raw, unencoded)
+// because some Xentral v1 endpoints reject the URL-encoded bracket form (%5B%5D).
 func listPage[T any](c *Client, ctx context.Context, path string, pageNum int) ([]T, error) {
-	body, err := c.get(ctx, path, url.Values{
-		"page[number]": []string{fmt.Sprintf("%d", pageNum)},
-		"page[size]":   []string{fmt.Sprintf("%d", pageSize)},
-	})
+	pathWithPage := fmt.Sprintf("%s?page[number]=%d&page[size]=%d", path, pageNum, pageSize)
+	body, _, err := c.do(ctx, pathWithPage, nil, nil)
 	if err != nil {
 		return nil, err
 	}
