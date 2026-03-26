@@ -78,8 +78,12 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 	}
 
 	tags := resolveTagNames(a.Tags)
-	attrs := resolveAttributes(a.Characteristics)
+	attrs := resolveAttributes(a.ResolvedCharacteristics())
 	active := !a.IsDisabled || a.Active
+
+	// Map Xentral freifelder → userDef fields via tenant-configured ProductFreefieldDef.
+	freifeldMap := a.ResolvedFreifelder()
+	userDefs := e.mapFreifelderToUserDefs(ctx, tenantID, freifeldMap)
 
 	if err == mongo.ErrNoDocuments {
 		// Create new product
@@ -97,6 +101,16 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 			Attributes:  attrs,
 			XentralNr:   truncate(articleNr, 50),
 			Active:      active,
+			UserDef01:   userDefs[0],
+			UserDef02:   userDefs[1],
+			UserDef03:   userDefs[2],
+			UserDef04:   userDefs[3],
+			UserDef05:   userDefs[4],
+			UserDef06:   userDefs[5],
+			UserDef07:   userDefs[6],
+			UserDef08:   userDefs[7],
+			UserDef09:   userDefs[8],
+			UserDef10:   userDefs[9],
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}
@@ -133,6 +147,16 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 		"attributes":  attrs,
 		"xentralNr":   truncate(articleNr, 50),
 		"active":      active,
+		"userDef01":   userDefs[0],
+		"userDef02":   userDefs[1],
+		"userDef03":   userDefs[2],
+		"userDef04":   userDefs[3],
+		"userDef05":   userDefs[4],
+		"userDef06":   userDefs[5],
+		"userDef07":   userDefs[6],
+		"userDef08":   userDefs[7],
+		"userDef09":   userDefs[8],
+		"userDef10":   userDefs[9],
 		"updatedAt":   now,
 	}
 
@@ -468,6 +492,7 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 	currency := xo.ResolvedCurrency()
 	orderNumber := xo.ResolvedOrderNumber()
 	totalNet := xo.ResolvedTotalNet()
+	orderUserDefs := e.mapFreifelderToUserDefs(ctx, tenantID, xo.ResolvedFreifelder())
 
 	if err == mongo.ErrNoDocuments {
 		order := models.Order{
@@ -479,6 +504,16 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 			Currency:    currency,
 			OrderSumUSD: totalNet,
 			Products:    orderProducts,
+			UserDef01:   orderUserDefs[0],
+			UserDef02:   orderUserDefs[1],
+			UserDef03:   orderUserDefs[2],
+			UserDef04:   orderUserDefs[3],
+			UserDef05:   orderUserDefs[4],
+			UserDef06:   orderUserDefs[5],
+			UserDef07:   orderUserDefs[6],
+			UserDef08:   orderUserDefs[7],
+			UserDef09:   orderUserDefs[8],
+			UserDef10:   orderUserDefs[9],
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}
@@ -505,6 +540,16 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 		"orderSumUsd": totalNet,
 		"currency":    currency,
 		"orderDate":   orderDate,
+		"userDef01":   orderUserDefs[0],
+		"userDef02":   orderUserDefs[1],
+		"userDef03":   orderUserDefs[2],
+		"userDef04":   orderUserDefs[3],
+		"userDef05":   orderUserDefs[4],
+		"userDef06":   orderUserDefs[5],
+		"userDef07":   orderUserDefs[6],
+		"userDef08":   orderUserDefs[7],
+		"userDef09":   orderUserDefs[8],
+		"userDef10":   orderUserDefs[9],
 		"updatedAt":   now,
 	}
 	if supplierID != nil {
@@ -592,6 +637,7 @@ func (e *Engine) upsertSalesOrder(ctx context.Context, tenantID primitive.Object
 	if currency == "" {
 		currency = xo.NetSales.Currency
 	}
+	soUserDefs := e.mapFreifelderToUserDefs(ctx, tenantID, xo.ResolvedFreifelder())
 
 	if err == mongo.ErrNoDocuments {
 		so := models.SalesOrder{
@@ -606,6 +652,16 @@ func (e *Engine) upsertSalesOrder(ctx context.Context, tenantID primitive.Object
 			TotalNetEUR:       netSales,
 			TotalGrossEUR:     total,
 			Currency:          currency,
+			UserDef01:         soUserDefs[0],
+			UserDef02:         soUserDefs[1],
+			UserDef03:         soUserDefs[2],
+			UserDef04:         soUserDefs[3],
+			UserDef05:         soUserDefs[4],
+			UserDef06:         soUserDefs[5],
+			UserDef07:         soUserDefs[6],
+			UserDef08:         soUserDefs[7],
+			UserDef09:         soUserDefs[8],
+			UserDef10:         soUserDefs[9],
 			CreatedAt:         now,
 			UpdatedAt:         now,
 		}
@@ -632,6 +688,16 @@ func (e *Engine) upsertSalesOrder(ctx context.Context, tenantID primitive.Object
 		"status":        xo.Status,
 		"totalNetEur":   netSales,
 		"totalGrossEur": total,
+		"userDef01":     soUserDefs[0],
+		"userDef02":     soUserDefs[1],
+		"userDef03":     soUserDefs[2],
+		"userDef04":     soUserDefs[3],
+		"userDef05":     soUserDefs[4],
+		"userDef06":     soUserDefs[5],
+		"userDef07":     soUserDefs[6],
+		"userDef08":     soUserDefs[7],
+		"userDef09":     soUserDefs[8],
+		"userDef10":     soUserDefs[9],
 		"updatedAt":     now,
 	}
 	if customerID != nil {
@@ -1644,4 +1710,37 @@ func resolveAttributes(chars []XCharacteristic) []models.ProductAttribute {
 		return nil
 	}
 	return out
+}
+
+// mapFreifelderToUserDefs loads the tenant's ProductFreefieldDef configuration and maps
+// Xentral freifeld values (e.g. "freifeld3") to a fixed-size [10]string array where
+// index 0 → UserDef01 … index 9 → UserDef10.
+// Only fields with a configured XentralKey mapping are populated; unmapped fields stay empty.
+func (e *Engine) mapFreifelderToUserDefs(ctx context.Context, tenantID primitive.ObjectID, freifelder map[string]string) [10]string {
+	var result [10]string
+	if len(freifelder) == 0 {
+		return result
+	}
+
+	cursor, err := e.db.ProductFreefieldDefs().Find(ctx, bson.M{"tenantId": tenantID})
+	if err != nil {
+		return result
+	}
+	defer cursor.Close(ctx)
+
+	var defs []models.ProductFreefieldDef
+	_ = cursor.All(ctx, &defs)
+
+	for _, def := range defs {
+		if def.XentralKey == "" {
+			continue
+		}
+		if val, ok := freifelder[def.XentralKey]; ok && val != "" {
+			idx := def.FieldIndex - 1 // FieldIndex is 1-based
+			if idx >= 0 && idx < 10 {
+				result[idx] = truncate(val, 255)
+			}
+		}
+	}
+	return result
 }

@@ -434,6 +434,17 @@ type Order struct {
 	PaymentStatus  string `json:"paymentStatus,omitempty" bson:"paymentStatus,omitempty" validate:"omitempty,oneof=unpaid deposit_paid fully_paid overdue"`
 	ReceiptStatus  string `json:"receiptStatus,omitempty" bson:"receiptStatus,omitempty" validate:"omitempty,oneof=pending partial received distributed"`
 	Tags           []string      `json:"tags,omitempty" bson:"tags,omitempty"`
+	// UserDef01–10: custom free-text fields mapped from Xentral Freifelder via ProductFreefieldDef.
+	UserDef01 string `json:"userDef01,omitempty" bson:"userDef01,omitempty" validate:"omitempty,max=255"`
+	UserDef02 string `json:"userDef02,omitempty" bson:"userDef02,omitempty" validate:"omitempty,max=255"`
+	UserDef03 string `json:"userDef03,omitempty" bson:"userDef03,omitempty" validate:"omitempty,max=255"`
+	UserDef04 string `json:"userDef04,omitempty" bson:"userDef04,omitempty" validate:"omitempty,max=255"`
+	UserDef05 string `json:"userDef05,omitempty" bson:"userDef05,omitempty" validate:"omitempty,max=255"`
+	UserDef06 string `json:"userDef06,omitempty" bson:"userDef06,omitempty" validate:"omitempty,max=255"`
+	UserDef07 string `json:"userDef07,omitempty" bson:"userDef07,omitempty" validate:"omitempty,max=255"`
+	UserDef08 string `json:"userDef08,omitempty" bson:"userDef08,omitempty" validate:"omitempty,max=255"`
+	UserDef09 string `json:"userDef09,omitempty" bson:"userDef09,omitempty" validate:"omitempty,max=255"`
+	UserDef10 string `json:"userDef10,omitempty" bson:"userDef10,omitempty" validate:"omitempty,max=255"`
 	Products  []OrderProduct `json:"products" bson:"products"`
 	Freights  []OrderFreight `json:"freights,omitempty" bson:"freights,omitempty"`
 	Freight   *OrderFreight  `json:"-" bson:"freight,omitempty"` // legacy single-freight field — migrated on read
@@ -642,6 +653,17 @@ type SalesOrder struct {
 	TotalGrossEUR        float64             `json:"totalGrossEur" bson:"totalGrossEur" validate:"min=0"`
 	Currency             string              `json:"currency,omitempty" bson:"currency,omitempty" validate:"omitempty,len=3"`
 	Tags                 []string            `json:"tags,omitempty" bson:"tags,omitempty"`
+	// UserDef01–10: custom free-text fields mapped from Xentral Freifelder.
+	UserDef01 string `json:"userDef01,omitempty" bson:"userDef01,omitempty" validate:"omitempty,max=255"`
+	UserDef02 string `json:"userDef02,omitempty" bson:"userDef02,omitempty" validate:"omitempty,max=255"`
+	UserDef03 string `json:"userDef03,omitempty" bson:"userDef03,omitempty" validate:"omitempty,max=255"`
+	UserDef04 string `json:"userDef04,omitempty" bson:"userDef04,omitempty" validate:"omitempty,max=255"`
+	UserDef05 string `json:"userDef05,omitempty" bson:"userDef05,omitempty" validate:"omitempty,max=255"`
+	UserDef06 string `json:"userDef06,omitempty" bson:"userDef06,omitempty" validate:"omitempty,max=255"`
+	UserDef07 string `json:"userDef07,omitempty" bson:"userDef07,omitempty" validate:"omitempty,max=255"`
+	UserDef08 string `json:"userDef08,omitempty" bson:"userDef08,omitempty" validate:"omitempty,max=255"`
+	UserDef09 string `json:"userDef09,omitempty" bson:"userDef09,omitempty" validate:"omitempty,max=255"`
+	UserDef10 string `json:"userDef10,omitempty" bson:"userDef10,omitempty" validate:"omitempty,max=255"`
 	LegacyID             int                 `json:"legacyId,omitempty" bson:"legacyId,omitempty"`
 	CreatedAt            time.Time           `json:"createdAt" bson:"createdAt"`
 	UpdatedAt            time.Time           `json:"updatedAt" bson:"updatedAt"`

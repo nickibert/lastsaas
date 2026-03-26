@@ -144,8 +144,54 @@ type XArticle struct {
 	IsDisabled       bool               `json:"isDisabled"`       // v1: true = inactive (inverted)
 	Active           bool               `json:"active"`           // fallback
 	UpdatedAt        string             `json:"updatedAt"`
-	Tags             []XTag             `json:"tags"`             // article tags (Schlagworte)
-	Characteristics  []XCharacteristic  `json:"characteristics"`  // product properties (Eigenschaften)
+	// Tags and properties (Xentral field names vary by version)
+	Tags            []XTag            `json:"tags"`            // article tags (Schlagworte)
+	Characteristics []XCharacteristic `json:"characteristics"` // Eigenschaften (some Xentral versions)
+	Properties      []XCharacteristic `json:"properties"`      // Eigenschaften (other Xentral versions)
+	// Freifelder 1–10 (custom text fields on articles)
+	Freifeld1  string `json:"freifeld1"`
+	Freifeld2  string `json:"freifeld2"`
+	Freifeld3  string `json:"freifeld3"`
+	Freifeld4  string `json:"freifeld4"`
+	Freifeld5  string `json:"freifeld5"`
+	Freifeld6  string `json:"freifeld6"`
+	Freifeld7  string `json:"freifeld7"`
+	Freifeld8  string `json:"freifeld8"`
+	Freifeld9  string `json:"freifeld9"`
+	Freifeld10 string `json:"freifeld10"`
+	// FreifeldValues is an alternative object form some Xentral versions use.
+	FreifeldValues map[string]string `json:"freifeldValues"`
+}
+
+// ResolvedCharacteristics returns product properties from whichever field is populated.
+// Xentral uses "characteristics" in some versions and "properties" in others.
+func (a *XArticle) ResolvedCharacteristics() []XCharacteristic {
+	if len(a.Characteristics) > 0 {
+		return a.Characteristics
+	}
+	return a.Properties
+}
+
+// ResolvedFreifelder returns a map from Xentral freefield key (e.g. "freifeld1") to value.
+// Merges flat fields and the FreifeldValues map; flat fields take precedence.
+func (a *XArticle) ResolvedFreifelder() map[string]string {
+	out := make(map[string]string, 10)
+	for k, v := range a.FreifeldValues {
+		if v != "" {
+			out[k] = v
+		}
+	}
+	// Flat fields override map entries
+	for i, v := range []string{a.Freifeld1, a.Freifeld2, a.Freifeld3, a.Freifeld4, a.Freifeld5,
+		a.Freifeld6, a.Freifeld7, a.Freifeld8, a.Freifeld9, a.Freifeld10} {
+		key := fmt.Sprintf("freifeld%d", i+1)
+		if v != "" {
+			out[key] = v
+		} else if _, exists := out[key]; !exists {
+			out[key] = ""
+		}
+	}
+	return out
 }
 
 // XTag represents a tag attached to a Xentral article.
@@ -155,7 +201,6 @@ type XTag struct {
 }
 
 // XCharacteristic represents a product attribute (Eigenschaft) in Xentral.
-// Endpoint /api/v1/products returns these as characteristics[].
 type XCharacteristic struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
@@ -295,6 +340,36 @@ type XPurchaseOrder struct {
 	TotalNet       float64       `json:"totalNet"`      // fallback flat field
 	Currency       string        `json:"currency"`      // fallback flat field
 	LineItems      []XPOLineItem `json:"lineItems"`     // populated via separate fetch
+	// Freifelder 1–10
+	Freifeld1      string            `json:"freifeld1"`
+	Freifeld2      string            `json:"freifeld2"`
+	Freifeld3      string            `json:"freifeld3"`
+	Freifeld4      string            `json:"freifeld4"`
+	Freifeld5      string            `json:"freifeld5"`
+	Freifeld6      string            `json:"freifeld6"`
+	Freifeld7      string            `json:"freifeld7"`
+	Freifeld8      string            `json:"freifeld8"`
+	Freifeld9      string            `json:"freifeld9"`
+	Freifeld10     string            `json:"freifeld10"`
+	FreifeldValues map[string]string `json:"freifeldValues"`
+}
+
+// ResolvedFreifelder returns a map from freefield key to value for this purchase order.
+func (o *XPurchaseOrder) ResolvedFreifelder() map[string]string {
+	out := make(map[string]string, 10)
+	for k, v := range o.FreifeldValues {
+		if v != "" {
+			out[k] = v
+		}
+	}
+	for i, v := range []string{o.Freifeld1, o.Freifeld2, o.Freifeld3, o.Freifeld4, o.Freifeld5,
+		o.Freifeld6, o.Freifeld7, o.Freifeld8, o.Freifeld9, o.Freifeld10} {
+		key := fmt.Sprintf("freifeld%d", i+1)
+		if v != "" {
+			out[key] = v
+		}
+	}
+	return out
 }
 
 // XPOTotals holds the financial totals of a purchase order.
@@ -1093,6 +1168,36 @@ type XSalesOrder struct {
 	NetSales            XSOAmount       `json:"netSales"`
 	Total               XSOAmount       `json:"total"`
 	Currency            string          `json:"currency"`
+	// Freifelder 1–10
+	Freifeld1      string            `json:"freifeld1"`
+	Freifeld2      string            `json:"freifeld2"`
+	Freifeld3      string            `json:"freifeld3"`
+	Freifeld4      string            `json:"freifeld4"`
+	Freifeld5      string            `json:"freifeld5"`
+	Freifeld6      string            `json:"freifeld6"`
+	Freifeld7      string            `json:"freifeld7"`
+	Freifeld8      string            `json:"freifeld8"`
+	Freifeld9      string            `json:"freifeld9"`
+	Freifeld10     string            `json:"freifeld10"`
+	FreifeldValues map[string]string `json:"freifeldValues"`
+}
+
+// ResolvedFreifelder returns a map from freefield key to value for this sales order.
+func (o *XSalesOrder) ResolvedFreifelder() map[string]string {
+	out := make(map[string]string, 10)
+	for k, v := range o.FreifeldValues {
+		if v != "" {
+			out[k] = v
+		}
+	}
+	for i, v := range []string{o.Freifeld1, o.Freifeld2, o.Freifeld3, o.Freifeld4, o.Freifeld5,
+		o.Freifeld6, o.Freifeld7, o.Freifeld8, o.Freifeld9, o.Freifeld10} {
+		key := fmt.Sprintf("freifeld%d", i+1)
+		if v != "" {
+			out[key] = v
+		}
+	}
+	return out
 }
 
 type XSOCustomer struct {
