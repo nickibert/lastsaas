@@ -69,7 +69,7 @@ export default function OrdersPage() {
 
   const { data: suppliersData } = useQuery({
     queryKey: ['suppliers', 1, 500],
-    queryFn: () => suppliersApi.list(1, 500),
+    queryFn: () => suppliersApi.list(undefined, 1, 500),
     enabled,
     throwOnError: false,
   });

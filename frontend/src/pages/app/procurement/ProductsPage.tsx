@@ -454,7 +454,7 @@ export default function ProductsPage() {
 
   const { data: goodsGroupsData } = useQuery({ queryKey: ['goods-groups', 1, 500], queryFn: () => goodsGroupsApi.list(1, 500), enabled, throwOnError: false });
   const goodsGroups = goodsGroupsData?.items ?? [];
-  const { data: suppliersData } = useQuery({ queryKey: ['suppliers', 1, 500], queryFn: () => suppliersApi.list(1, 500), enabled, throwOnError: false });
+  const { data: suppliersData } = useQuery({ queryKey: ['suppliers', 1, 500], queryFn: () => suppliersApi.list(undefined, 1, 500), enabled, throwOnError: false });
   const suppliers = suppliersData?.items ?? [];
 
   const createMutation = useMutation({

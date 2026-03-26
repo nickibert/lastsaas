@@ -110,7 +110,7 @@ export default function OrderDetailPage() {
     throwOnError: false,
   });
 
-  const { data: suppliersData } = useQuery({ queryKey: ['suppliers', 1, 500], queryFn: () => suppliersApi.list(1, 500), enabled, throwOnError: false });
+  const { data: suppliersData } = useQuery({ queryKey: ['suppliers', 1, 500], queryFn: () => suppliersApi.list(undefined, 1, 500), enabled, throwOnError: false });
   const suppliers = suppliersData?.items ?? [];
   // productNames caches id→name for display in order product rows
   const [productNames, setProductNames] = useState<Record<string, string>>({});
