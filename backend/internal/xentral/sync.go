@@ -81,9 +81,7 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 	attrs := resolveAttributes(a.ResolvedCharacteristics())
 	active := !a.IsDisabled || a.Active
 
-	// Map Xentral freifelder → userDef fields via tenant-configured ProductFreefieldDef.
-	freifeldMap := a.ResolvedFreifelder()
-	userDefs := e.mapFreifelderToUserDefs(ctx, tenantID, freifeldMap)
+	userDefs := mapFreifelderToUserDefs(a.ResolvedFreifelder())
 
 	if err == mongo.ErrNoDocuments {
 		// Create new product
@@ -492,7 +490,7 @@ func (e *Engine) upsertOrder(ctx context.Context, tenantID primitive.ObjectID, x
 	currency := xo.ResolvedCurrency()
 	orderNumber := xo.ResolvedOrderNumber()
 	totalNet := xo.ResolvedTotalNet()
-	orderUserDefs := e.mapFreifelderToUserDefs(ctx, tenantID, xo.ResolvedFreifelder())
+	orderUserDefs := mapFreifelderToUserDefs(xo.ResolvedFreifelder())
 
 	if err == mongo.ErrNoDocuments {
 		order := models.Order{
@@ -637,7 +635,7 @@ func (e *Engine) upsertSalesOrder(ctx context.Context, tenantID primitive.Object
 	if currency == "" {
 		currency = xo.NetSales.Currency
 	}
-	soUserDefs := e.mapFreifelderToUserDefs(ctx, tenantID, xo.ResolvedFreifelder())
+	soUserDefs := mapFreifelderToUserDefs(xo.ResolvedFreifelder())
 
 	if err == mongo.ErrNoDocuments {
 		so := models.SalesOrder{
@@ -1712,34 +1710,14 @@ func resolveAttributes(chars []XCharacteristic) []models.ProductAttribute {
 	return out
 }
 
-// mapFreifelderToUserDefs loads the tenant's ProductFreefieldDef configuration and maps
-// Xentral freifeld values (e.g. "freifeld3") to a fixed-size [10]string array where
-// index 0 → UserDef01 … index 9 → UserDef10.
-// Only fields with a configured XentralKey mapping are populated; unmapped fields stay empty.
-func (e *Engine) mapFreifelderToUserDefs(ctx context.Context, tenantID primitive.ObjectID, freifelder map[string]string) [10]string {
+// mapFreifelderToUserDefs maps Xentral freifeld1..10 directly to UserDef01..10 (1:1).
+// freifeld1 → index 0 (UserDef01), ..., freifeld10 → index 9 (UserDef10).
+func mapFreifelderToUserDefs(freifelder map[string]string) [10]string {
 	var result [10]string
-	if len(freifelder) == 0 {
-		return result
-	}
-
-	cursor, err := e.db.ProductFreefieldDefs().Find(ctx, bson.M{"tenantId": tenantID})
-	if err != nil {
-		return result
-	}
-	defer cursor.Close(ctx)
-
-	var defs []models.ProductFreefieldDef
-	_ = cursor.All(ctx, &defs)
-
-	for _, def := range defs {
-		if def.XentralKey == "" {
-			continue
-		}
-		if val, ok := freifelder[def.XentralKey]; ok && val != "" {
-			idx := def.FieldIndex - 1 // FieldIndex is 1-based
-			if idx >= 0 && idx < 10 {
-				result[idx] = truncate(val, 255)
-			}
+	for i := range result {
+		key := fmt.Sprintf("freifeld%d", i+1)
+		if v, ok := freifelder[key]; ok {
+			result[i] = truncate(v, 255)
 		}
 	}
 	return result
