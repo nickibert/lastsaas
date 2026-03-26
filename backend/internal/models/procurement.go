@@ -118,6 +118,10 @@ type Product struct {
 	// PIM: Tags and structured attributes
 	Tags       []string           `json:"tags,omitempty" bson:"tags,omitempty"`
 	Attributes []ProductAttribute `json:"attributes,omitempty" bson:"attributes,omitempty"`
+	// Xentral article number (read-only from sync; used for cross-referencing)
+	XentralNr string `json:"xentralNr,omitempty" bson:"xentralNr,omitempty" validate:"omitempty,max=50"`
+	// Active reflects the enabled/disabled status from Xentral (inverse of isDisabled)
+	Active bool `json:"active" bson:"active"`
 	// Custom fields (legacy userdef01-10)
 	UserDef01 string `json:"userDef01" bson:"userDef01"`
 	UserDef02 string `json:"userDef02" bson:"userDef02"`
@@ -527,9 +531,12 @@ type Warehouse struct {
 	Name        string             `json:"name" bson:"name" validate:"required,min=1,max=100"`
 	ShortName   string             `json:"shortName,omitempty" bson:"shortName,omitempty" validate:"omitempty,max=20"`
 	Description string             `json:"description,omitempty" bson:"description,omitempty" validate:"omitempty,max=500"`
-	Active      bool               `json:"active" bson:"active"`
-	CreatedAt   time.Time          `json:"createdAt" bson:"createdAt"`
-	UpdatedAt   time.Time          `json:"updatedAt" bson:"updatedAt"`
+	// Address is important for tax compliance (country determines VAT rules).
+	// Filled manually; not overwritten by Xentral sync.
+	Address   CustomerAddress `json:"address,omitempty" bson:"address,omitempty"`
+	Active    bool            `json:"active" bson:"active"`
+	CreatedAt time.Time       `json:"createdAt" bson:"createdAt"`
+	UpdatedAt time.Time       `json:"updatedAt" bson:"updatedAt"`
 }
 
 // StorageLocation represents a specific bin/shelf (Lagerplatz) within a Warehouse.

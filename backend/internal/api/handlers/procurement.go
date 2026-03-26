@@ -189,6 +189,20 @@ func (h *ProcurementHandler) RegisterRoutes(r *mux.Router, authMW mux.Middleware
 	s.HandleFunc("/customers/{id}", h.updateCustomer).Methods(http.MethodPut)
 	s.HandleFunc("/customers/{id}", h.deleteCustomer).Methods(http.MethodDelete)
 
+	// Warehouses (Lager)
+	s.HandleFunc("/warehouses", h.listWarehouses).Methods(http.MethodGet)
+	s.HandleFunc("/warehouses", h.createWarehouse).Methods(http.MethodPost)
+	s.HandleFunc("/warehouses/{id}", h.getWarehouse).Methods(http.MethodGet)
+	s.HandleFunc("/warehouses/{id}", h.updateWarehouse).Methods(http.MethodPut)
+	s.HandleFunc("/warehouses/{id}", h.deleteWarehouse).Methods(http.MethodDelete)
+
+	// Storage locations (Lagerplätze)
+	s.HandleFunc("/storage-locations", h.listStorageLocations).Methods(http.MethodGet)
+	s.HandleFunc("/storage-locations", h.createStorageLocation).Methods(http.MethodPost)
+	s.HandleFunc("/storage-locations/{id}", h.getStorageLocation).Methods(http.MethodGet)
+	s.HandleFunc("/storage-locations/{id}", h.updateStorageLocation).Methods(http.MethodPut)
+	s.HandleFunc("/storage-locations/{id}", h.deleteStorageLocation).Methods(http.MethodDelete)
+
 	// Stock movements (Wareneingang / Warenausgang)
 	s.HandleFunc("/stock/movements", h.listStockMovements).Methods(http.MethodGet)
 	s.HandleFunc("/stock/movements", h.createStockMovement).Methods(http.MethodPost)
@@ -252,6 +266,14 @@ func (h *ProcurementHandler) listSuppliers(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	filter := bson.M{"tenantId": tenantID}
+	if q := r.URL.Query().Get("q"); q != "" {
+		filter["$or"] = bson.A{
+			bson.M{"company": bson.M{"$regex": q, "$options": "i"}},
+			bson.M{"firstname": bson.M{"$regex": q, "$options": "i"}},
+			bson.M{"lastname": bson.M{"$regex": q, "$options": "i"}},
+			bson.M{"email": bson.M{"$regex": q, "$options": "i"}},
+		}
+	}
 	page, limit, skip := parsePagination(r)
 	total, _ := h.db.Suppliers().CountDocuments(r.Context(), filter)
 	cursor, err := h.db.Suppliers().Find(r.Context(), filter,
@@ -3046,4 +3068,301 @@ func (h *ProcurementHandler) updateProcurementConfig(w http.ResponseWriter, r *h
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ekDbMethode": req.EkDbMethode})
+}
+
+// ---------------------------------------------------------------------------
+// Warehouses (Lager)
+// GET    /warehouses          ?q=  &country=  &active=  &page=  &limit=
+// POST   /warehouses
+// GET    /warehouses/{id}
+// PUT    /warehouses/{id}
+// DELETE /warehouses/{id}
+// ---------------------------------------------------------------------------
+
+func (h *ProcurementHandler) listWarehouses(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	filter := bson.M{"tenantId": tenantID}
+	andClauses := bson.A{}
+	if q := r.URL.Query().Get("q"); q != "" {
+		andClauses = append(andClauses, bson.M{"$or": bson.A{
+			bson.M{"name": bson.M{"$regex": q, "$options": "i"}},
+			bson.M{"shortName": bson.M{"$regex": q, "$options": "i"}},
+			bson.M{"description": bson.M{"$regex": q, "$options": "i"}},
+		}})
+	}
+	if country := r.URL.Query().Get("country"); country != "" {
+		andClauses = append(andClauses, bson.M{"address.country": bson.M{"$regex": "^" + country + "$", "$options": "i"}})
+	}
+	if activeStr := r.URL.Query().Get("active"); activeStr != "" {
+		filter["active"] = activeStr == "true"
+	}
+	if len(andClauses) > 0 {
+		filter["$and"] = andClauses
+	}
+	page, limit, skip := parsePagination(r)
+	total, _ := h.db.Warehouses().CountDocuments(r.Context(), filter)
+	cursor, err := h.db.Warehouses().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "name", Value: 1}}).SetSkip(skip).SetLimit(limit))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	items := make([]models.Warehouse, 0)
+	cursor.All(r.Context(), &items) //nolint
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": items,
+		"total": total,
+		"page":  page,
+		"pages": (total + limit - 1) / limit,
+	})
+}
+
+func (h *ProcurementHandler) createWarehouse(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var doc models.Warehouse
+	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	doc.ID = primitive.NewObjectID()
+	doc.TenantID = tenantID
+	doc.CreatedAt = time.Now().UTC()
+	doc.UpdatedAt = doc.CreatedAt
+	if _, err := h.db.Warehouses().InsertOne(r.Context(), doc); err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusCreated, doc)
+}
+
+func (h *ProcurementHandler) getWarehouse(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var doc models.Warehouse
+	if err := h.db.Warehouses().FindOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID}).Decode(&doc); err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, doc)
+}
+
+func (h *ProcurementHandler) updateWarehouse(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var doc models.Warehouse
+	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	_, err := h.db.Warehouses().UpdateOne(r.Context(),
+		bson.M{"_id": id, "tenantId": tenantID},
+		bson.M{"$set": bson.M{
+			"name":        doc.Name,
+			"shortName":   doc.ShortName,
+			"description": doc.Description,
+			"address":     doc.Address,
+			"active":      doc.Active,
+			"updatedAt":   time.Now().UTC(),
+		}},
+	)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	doc.ID = id
+	doc.TenantID = tenantID
+	writeJSON(w, http.StatusOK, doc)
+}
+
+func (h *ProcurementHandler) deleteWarehouse(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	_, err := h.db.Warehouses().DeleteOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID})
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------------------
+// Storage Locations (Lagerplätze)
+// GET    /storage-locations   ?q=  &warehouseId=  &active=  &page=  &limit=
+// POST   /storage-locations
+// GET    /storage-locations/{id}
+// PUT    /storage-locations/{id}
+// DELETE /storage-locations/{id}
+// ---------------------------------------------------------------------------
+
+func (h *ProcurementHandler) listStorageLocations(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	filter := bson.M{"tenantId": tenantID}
+	andClauses := bson.A{}
+	if q := r.URL.Query().Get("q"); q != "" {
+		andClauses = append(andClauses, bson.M{"$or": bson.A{
+			bson.M{"name": bson.M{"$regex": q, "$options": "i"}},
+			bson.M{"aisle": bson.M{"$regex": q, "$options": "i"}},
+			bson.M{"rack": bson.M{"$regex": q, "$options": "i"}},
+		}})
+	}
+	if wid := r.URL.Query().Get("warehouseId"); wid != "" {
+		if oid, err := primitive.ObjectIDFromHex(wid); err == nil {
+			filter["warehouseId"] = oid
+		}
+	}
+	if activeStr := r.URL.Query().Get("active"); activeStr != "" {
+		filter["active"] = activeStr == "true"
+	}
+	if len(andClauses) > 0 {
+		filter["$and"] = andClauses
+	}
+	page, limit, skip := parsePagination(r)
+	total, _ := h.db.StorageLocations().CountDocuments(r.Context(), filter)
+	cursor, err := h.db.StorageLocations().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "name", Value: 1}}).SetSkip(skip).SetLimit(limit))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	items := make([]models.StorageLocation, 0)
+	cursor.All(r.Context(), &items) //nolint
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": items,
+		"total": total,
+		"page":  page,
+		"pages": (total + limit - 1) / limit,
+	})
+}
+
+func (h *ProcurementHandler) createStorageLocation(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var doc models.StorageLocation
+	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	doc.ID = primitive.NewObjectID()
+	doc.TenantID = tenantID
+	doc.CreatedAt = time.Now().UTC()
+	doc.UpdatedAt = doc.CreatedAt
+	if _, err := h.db.StorageLocations().InsertOne(r.Context(), doc); err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusCreated, doc)
+}
+
+func (h *ProcurementHandler) getStorageLocation(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var doc models.StorageLocation
+	if err := h.db.StorageLocations().FindOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID}).Decode(&doc); err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, doc)
+}
+
+func (h *ProcurementHandler) updateStorageLocation(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var doc models.StorageLocation
+	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	_, err := h.db.StorageLocations().UpdateOne(r.Context(),
+		bson.M{"_id": id, "tenantId": tenantID},
+		bson.M{"$set": bson.M{
+			"name":        doc.Name,
+			"warehouseId": doc.WarehouseID,
+			"aisle":       doc.Aisle,
+			"rack":        doc.Rack,
+			"level":       doc.Level,
+			"active":      doc.Active,
+			"updatedAt":   time.Now().UTC(),
+		}},
+	)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	doc.ID = id
+	doc.TenantID = tenantID
+	writeJSON(w, http.StatusOK, doc)
+}
+
+func (h *ProcurementHandler) deleteStorageLocation(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, ok := parseID(r, "id")
+	if !ok {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	_, err := h.db.StorageLocations().DeleteOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID})
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
