@@ -81,7 +81,7 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 	attrs := resolveAttributes(a.ResolvedCharacteristics())
 	active := !a.IsDisabled || a.Active
 
-	userDefs := mapFreifelderToUserDefs(a.ResolvedFreifelder())
+	freeFields := resolveFreeFields(a.FreeFields)
 
 	if err == mongo.ErrNoDocuments {
 		// Create new product
@@ -99,16 +99,7 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 			Attributes:  attrs,
 			XentralNr:   truncate(articleNr, 50),
 			Active:      active,
-			UserDef01:   userDefs[0],
-			UserDef02:   userDefs[1],
-			UserDef03:   userDefs[2],
-			UserDef04:   userDefs[3],
-			UserDef05:   userDefs[4],
-			UserDef06:   userDefs[5],
-			UserDef07:   userDefs[6],
-			UserDef08:   userDefs[7],
-			UserDef09:   userDefs[8],
-			UserDef10:   userDefs[9],
+			FreeFields:  freeFields,
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}
@@ -145,16 +136,7 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 		"attributes":  attrs,
 		"xentralNr":   truncate(articleNr, 50),
 		"active":      active,
-		"userDef01":   userDefs[0],
-		"userDef02":   userDefs[1],
-		"userDef03":   userDefs[2],
-		"userDef04":   userDefs[3],
-		"userDef05":   userDefs[4],
-		"userDef06":   userDefs[5],
-		"userDef07":   userDefs[6],
-		"userDef08":   userDefs[7],
-		"userDef09":   userDefs[8],
-		"userDef10":   userDefs[9],
+		"freeFields":  freeFields,
 		"updatedAt":   now,
 	}
 
@@ -1710,8 +1692,37 @@ func resolveAttributes(chars []XCharacteristic) []models.ProductAttribute {
 	return out
 }
 
+// resolveFreeFields converts XV2FreeField entries from the v2 products API into
+// ProductFreeField model objects, skipping entries without a value.
+// The name is taken from the non-null Name pointer; entries with null name are kept
+// if they have a value (using empty string as name in that case).
+func resolveFreeFields(fields []XV2FreeField) []models.ProductFreeField {
+	if len(fields) == 0 {
+		return nil
+	}
+	out := make([]models.ProductFreeField, 0, len(fields))
+	for _, f := range fields {
+		if f.Value == "" {
+			continue
+		}
+		name := ""
+		if f.Name != nil {
+			name = *f.Name
+		}
+		out = append(out, models.ProductFreeField{
+			ID:    f.ID,
+			Name:  truncate(name, 255),
+			Value: truncate(f.Value, 500),
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // mapFreifelderToUserDefs maps Xentral freifeld1..10 directly to UserDef01..10 (1:1).
-// freifeld1 → index 0 (UserDef01), ..., freifeld10 → index 9 (UserDef10).
+// Used for orders and sales orders (v1/v3 API still uses flat freifeld fields).
 func mapFreifelderToUserDefs(freifelder map[string]string) [10]string {
 	var result [10]string
 	for i := range result {

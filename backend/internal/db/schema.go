@@ -731,6 +731,17 @@ func productsSchema() CollectionSchema {
 					"description": bson.M{"bsonType": "string"},
 					"active":      bson.M{"bsonType": "bool"},
 					"xentralNr":   bson.M{"bsonType": "string", "maxLength": 50},
+					"freeFields": bson.M{
+						"bsonType": "array",
+						"items": bson.M{
+							"bsonType": "object",
+							"properties": bson.M{
+								"id":    bson.M{"bsonType": "string"},
+								"name":  bson.M{"bsonType": "string"},
+								"value": bson.M{"bsonType": "string", "maxLength": 500},
+							},
+						},
+					},
 					"createdAt":   bson.M{"bsonType": "date"},
 					"updatedAt":   bson.M{"bsonType": "date"},
 				},

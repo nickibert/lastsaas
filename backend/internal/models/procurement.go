@@ -89,6 +89,14 @@ type ProductAttribute struct {
 	Unit  string `json:"unit,omitempty" bson:"unit,omitempty" validate:"omitempty,max=30"`
 }
 
+// ProductFreeField stores one Xentral Freifeld entry as synced from /api/v2/products.
+// ID is the Xentral slot number (e.g. "1".."40"), Name is the configured label.
+type ProductFreeField struct {
+	ID    string `json:"id" bson:"id"`
+	Name  string `json:"name" bson:"name"`
+	Value string `json:"value" bson:"value" validate:"max=500"`
+}
+
 type Product struct {
 	ID             primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
 	TenantID       primitive.ObjectID  `json:"tenantId" bson:"tenantId" validate:"required"`
@@ -122,17 +130,9 @@ type Product struct {
 	XentralNr string `json:"xentralNr,omitempty" bson:"xentralNr,omitempty" validate:"omitempty,max=50"`
 	// Active reflects the enabled/disabled status from Xentral (inverse of isDisabled)
 	Active bool `json:"active" bson:"active"`
-	// Custom fields (legacy userdef01-10)
-	UserDef01 string `json:"userDef01" bson:"userDef01"`
-	UserDef02 string `json:"userDef02" bson:"userDef02"`
-	UserDef03 string `json:"userDef03" bson:"userDef03"`
-	UserDef04 string `json:"userDef04" bson:"userDef04"`
-	UserDef05 string `json:"userDef05" bson:"userDef05"`
-	UserDef06 string `json:"userDef06" bson:"userDef06"`
-	UserDef07 string `json:"userDef07" bson:"userDef07"`
-	UserDef08 string `json:"userDef08" bson:"userDef08"`
-	UserDef09 string `json:"userDef09" bson:"userDef09"`
-	UserDef10 string `json:"userDef10" bson:"userDef10"`
+	// FreeFields stores Xentral Freifelder exactly as configured (ID, name, value).
+	// The list is dynamic — Xentral supports up to 40 fields per tenant.
+	FreeFields []ProductFreeField `json:"freeFields,omitempty" bson:"freeFields,omitempty"`
 	Checked   bool   `json:"checked" bson:"checked"`
 	Virtual   bool   `json:"virtual" bson:"virtual"`
 	LegacyID  int    `json:"legacyId,omitempty" bson:"legacyId,omitempty"`
