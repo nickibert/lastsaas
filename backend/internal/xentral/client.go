@@ -125,70 +125,129 @@ func (s *XentralSettings) ResolvedCompanyName() string {
 }
 
 // XArticle represents a product/article record from Xentral.
-// The actual /api/v1/products response uses different field names than legacy versions.
-// Resolver methods handle both formats transparently.
+// The v2 API (/api/v2/products) returns freeFields and selectedOptions/options
+// instead of the flat freifeld1..10 and characteristics fields from v1.
+// All resolver methods handle both versions transparently.
 type XArticle struct {
-	ID               string             `json:"id"`
-	UUID             string             `json:"uuid"`
-	Number           string             `json:"number"`           // v1 API primary article number
-	ArticleNumber    string             `json:"articleNumber"`    // fallback (older API versions)
-	Name             string             `json:"name"`
-	Description      string             `json:"description"`
-	EAN              string             `json:"ean"`
-	PurchasePriceNet XPOAmount          `json:"purchasePriceNet"` // v1: {amount:"9.0000", currency:"EUR"}
-	SalesPriceNet    XPOAmount          `json:"salesPriceNet"`    // v1: {amount:"25.0000", currency:"EUR"}
-	PurchasePrice    float64            `json:"purchasePrice"`    // fallback flat float
-	SellPrice        float64            `json:"sellPrice"`        // fallback flat float
-	Measurements     XArticleMeasure    `json:"measurements"`     // v1: {weight:{value:1.1, unit:"kg"}}
-	Weight           float64            `json:"weight"`           // fallback flat float
-	IsDisabled       bool               `json:"isDisabled"`       // v1: true = inactive (inverted)
-	Active           bool               `json:"active"`           // fallback
-	UpdatedAt        string             `json:"updatedAt"`
-	// Tags and properties (Xentral field names vary by version)
-	Tags            []XTag            `json:"tags"`            // article tags (Schlagworte)
-	Characteristics []XCharacteristic `json:"characteristics"` // Eigenschaften (some Xentral versions)
-	Properties      []XCharacteristic `json:"properties"`      // Eigenschaften (other Xentral versions)
-	// Freifelder 1–10 (custom text fields on articles)
-	Freifeld1  string `json:"freifeld1"`
-	Freifeld2  string `json:"freifeld2"`
-	Freifeld3  string `json:"freifeld3"`
-	Freifeld4  string `json:"freifeld4"`
-	Freifeld5  string `json:"freifeld5"`
-	Freifeld6  string `json:"freifeld6"`
-	Freifeld7  string `json:"freifeld7"`
-	Freifeld8  string `json:"freifeld8"`
-	Freifeld9  string `json:"freifeld9"`
-	Freifeld10 string `json:"freifeld10"`
-	// FreifeldValues is an alternative object form some Xentral versions use.
-	FreifeldValues map[string]string `json:"freifeldValues"`
+	ID               string          `json:"id"`
+	UUID             string          `json:"uuid"`
+	Number           string          `json:"number"`           // primary article number
+	ArticleNumber    string          `json:"articleNumber"`    // fallback (older API versions)
+	Name             string          `json:"name"`
+	Description      string          `json:"description"`
+	EAN              string          `json:"ean"`
+	PurchasePriceNet XPOAmount       `json:"purchasePriceNet"` // {amount:"9.0000", currency:"EUR"}
+	SalesPriceNet    XPOAmount       `json:"salesPriceNet"`
+	PurchasePrice    float64         `json:"purchasePrice"`    // fallback flat float
+	SellPrice        float64         `json:"sellPrice"`        // fallback flat float
+	Measurements     XArticleMeasure `json:"measurements"`     // {weight:{value:1.1, unit:"kg"}}
+	Weight           float64         `json:"weight"`           // fallback flat float
+	IsDisabled       bool            `json:"isDisabled"`       // true = inactive (inverted)
+	Active           bool            `json:"active"`           // fallback
+	UpdatedAt        string          `json:"updatedAt"`
+	// v2: tags, free fields and variant options
+	Tags            []XTag           `json:"tags"`            // Schlagworte
+	FreeFields      []XV2FreeField   `json:"freeFields"`      // v2 Freifelder
+	SelectedOptions []XV2Option      `json:"selectedOptions"` // v2 Eigenschaften (Varianten)
+	Options         []XV2Option      `json:"options"`         // v2 Eigenschaften (Matrixprodukt)
+	// v1 fallback fields
+	Characteristics []XCharacteristic `json:"characteristics"`
+	Properties      []XCharacteristic `json:"properties"`
+	Freifeld1       string            `json:"freifeld1"`
+	Freifeld2       string            `json:"freifeld2"`
+	Freifeld3       string            `json:"freifeld3"`
+	Freifeld4       string            `json:"freifeld4"`
+	Freifeld5       string            `json:"freifeld5"`
+	Freifeld6       string            `json:"freifeld6"`
+	Freifeld7       string            `json:"freifeld7"`
+	Freifeld8       string            `json:"freifeld8"`
+	Freifeld9       string            `json:"freifeld9"`
+	Freifeld10      string            `json:"freifeld10"`
+	FreifeldValues  map[string]string `json:"freifeldValues"`
 }
 
-// ResolvedCharacteristics returns product properties from whichever field is populated.
-// Xentral uses "characteristics" in some versions and "properties" in others.
+// XV2FreeField is a single Freifeld entry as returned by the v2 products API.
+// Name can be null for unused/unconfigured slots.
+type XV2FreeField struct {
+	ID    string  `json:"id"`
+	Name  *string `json:"name"`
+	Value string  `json:"value"`
+}
+
+// XV2Option is a product option (Eigenschaft) as returned by the v2 products API.
+// Used in both selectedOptions (variants) and options (matrix products).
+type XV2Option struct {
+	ID     string           `json:"id"`
+	Name   string           `json:"name"`
+	Values []XV2OptionValue `json:"values"`
+}
+
+// XV2OptionValue is one concrete value of a product option (e.g. "rot", "100x150cm").
+type XV2OptionValue struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Sort int    `json:"sort"`
+}
+
+// ResolvedCharacteristics returns product attributes (Eigenschaften) from whichever
+// fields are populated. v2 uses selectedOptions (variants) or options (matrix products);
+// v1 uses characteristics or properties.
 func (a *XArticle) ResolvedCharacteristics() []XCharacteristic {
+	// v2: prefer selectedOptions, fall back to options
+	opts := a.SelectedOptions
+	if len(opts) == 0 {
+		opts = a.Options
+	}
+	if len(opts) > 0 {
+		var out []XCharacteristic
+		for _, opt := range opts {
+			for _, val := range opt.Values {
+				if opt.Name != "" && val.Name != "" {
+					out = append(out, XCharacteristic{Name: opt.Name, Value: val.Name})
+				}
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	// v1 fallback
 	if len(a.Characteristics) > 0 {
 		return a.Characteristics
 	}
 	return a.Properties
 }
 
-// ResolvedFreifelder returns a map from Xentral freefield key (e.g. "freifeld1") to value.
-// Merges flat fields and the FreifeldValues map; flat fields take precedence.
+// ResolvedFreifelder returns a map from "freifeld1".."freifeld10" to their values.
+// v2: uses freeFields array (id "1"→"freifeld1" etc., IDs > 10 are ignored).
+// v1 fallback: uses flat freifeld1..10 fields and freifeldValues map.
 func (a *XArticle) ResolvedFreifelder() map[string]string {
 	out := make(map[string]string, 10)
+	// v2: freeFields array
+	if len(a.FreeFields) > 0 {
+		for _, ff := range a.FreeFields {
+			if ff.Value == "" {
+				continue
+			}
+			id, err := strconv.Atoi(ff.ID)
+			if err != nil || id < 1 || id > 10 {
+				continue
+			}
+			out[fmt.Sprintf("freifeld%d", id)] = ff.Value
+		}
+		return out
+	}
+	// v1 fallback: freifeldValues map + flat fields
 	for k, v := range a.FreifeldValues {
 		if v != "" {
 			out[k] = v
 		}
 	}
-	// Flat fields override map entries
 	for i, v := range []string{a.Freifeld1, a.Freifeld2, a.Freifeld3, a.Freifeld4, a.Freifeld5,
 		a.Freifeld6, a.Freifeld7, a.Freifeld8, a.Freifeld9, a.Freifeld10} {
 		key := fmt.Sprintf("freifeld%d", i+1)
 		if v != "" {
 			out[key] = v
-		} else if _, exists := out[key]; !exists {
-			out[key] = ""
 		}
 	}
 	return out
@@ -580,11 +639,11 @@ func listPage[T any](c *Client, ctx context.Context, path string, pageNum int) (
 	return result.Data, nil
 }
 
-// ListArticles fetches all articles from Xentral across all pages.
+// ListArticles fetches all articles from Xentral across all pages using the v2 API.
 func (c *Client) ListArticles(ctx context.Context) ([]XArticle, error) {
 	var all []XArticle
 	for page := 1; ; page++ {
-		batch, err := listPage[XArticle](c, ctx, "/api/v1/products", page)
+		batch, err := listPage[XArticle](c, ctx, "/api/v2/products", page)
 		if err != nil {
 			return nil, err
 		}
