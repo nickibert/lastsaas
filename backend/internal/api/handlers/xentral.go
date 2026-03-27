@@ -271,9 +271,6 @@ func (h *XentralHandler) triggerSyncAll(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
-
 	// Sync order is determined by data dependencies:
 	//
 	// Phase 1 – Master data (no local dependencies):
@@ -307,9 +304,23 @@ func (h *XentralHandler) triggerSyncAll(w http.ResponseWriter, r *http.Request) 
 		"push_orders",
 	}
 
+	// Per-entity timeouts: products require one detail API call per item (N+1),
+	// which can take several hours for large catalogs. Each entity gets its own
+	// independent context so a slow sync does not cancel subsequent entities.
+	entityTimeout := map[string]time.Duration{
+		"products": 6 * time.Hour,
+	}
+	defaultTimeout := 2 * time.Hour
+
 	var logs []models.XentralSyncLog
 	for _, entity := range syncOrder {
-		log := h.runSync(syncCtx, tenantID, entity, cfg, client)
+		timeout, ok := entityTimeout[entity]
+		if !ok {
+			timeout = defaultTimeout
+		}
+		entityCtx, entityCancel := context.WithTimeout(context.Background(), timeout)
+		log := h.runSync(entityCtx, tenantID, entity, cfg, client)
+		entityCancel()
 		logs = append(logs, log)
 	}
 	writeJSON(w, http.StatusOK, logs)
