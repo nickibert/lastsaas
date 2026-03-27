@@ -3,6 +3,8 @@ package xentral
 import (
 	"context"
 	"fmt"
+	"math"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -88,6 +90,17 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 
 	freeFields := resolveFreeFields(a.FreeFields)
 
+	// Resolve merchandise group → local GoodsGroup
+	var goodsGroupID *primitive.ObjectID
+	if a.MerchandiseGroup.ID != "" {
+		var gg struct {
+			ID primitive.ObjectID `bson:"_id"`
+		}
+		if err2 := e.db.GoodsGroups().FindOne(ctx, bson.M{"tenantId": tenantID, "xentralId": a.MerchandiseGroup.ID}).Decode(&gg); err2 == nil {
+			goodsGroupID = &gg.ID
+		}
+	}
+
 	if err == mongo.ErrNoDocuments {
 		// Create new product
 		product := models.Product{
@@ -102,6 +115,7 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 			LastVK:      a.ResolvedSellPrice(),
 			Tags:        tags,
 			Attributes:  attrs,
+			GoodsGroupID: goodsGroupID,
 			XentralNr:   truncate(articleNr, 50),
 			Active:      active,
 			FreeFields:  freeFields,
@@ -143,6 +157,9 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 		"active":      active,
 		"freeFields":  freeFields,
 		"updatedAt":   now,
+	}
+	if goodsGroupID != nil {
+		setFields["goodsGroupId"] = goodsGroupID
 	}
 
 	// Fetch current product to check whether EAN / lastEk / lastVk are already set
@@ -1737,4 +1754,362 @@ func mapFreifelderToUserDefs(freifelder map[string]string) [10]string {
 		}
 	}
 	return result
+}
+
+// -------------------------------------------------------------------
+// Merchandise Groups (Xentral /api/v1/productsMerchandiseGroups → LastSaaS GoodsGroups)
+// -------------------------------------------------------------------
+
+func (e *Engine) SyncMerchandiseGroups(ctx context.Context, tenantID primitive.ObjectID, client *Client) models.XentralSyncLog {
+	log := e.startLog(ctx, tenantID, "merchandise_groups")
+
+	groups, err := client.ListMerchandiseGroups(ctx)
+	if err != nil {
+		return e.failLog(ctx, log, err.Error())
+	}
+
+	for _, g := range groups {
+		if err := e.upsertGoodsGroup(ctx, tenantID, g); err != nil {
+			log.Errors = append(log.Errors, fmt.Sprintf("%s: %v", g.ID, err))
+			log.Skipped++
+		} else {
+			log.Updated++
+		}
+	}
+	return e.finishLog(ctx, log)
+}
+
+func (e *Engine) upsertGoodsGroup(ctx context.Context, tenantID primitive.ObjectID, xg XMerchandiseGroup) error {
+	if xg.ID == "" || xg.Name == "" {
+		return nil
+	}
+	now := time.Now()
+	short := truncate(xg.Number, 10)
+	if short == "" {
+		// Derive a short code from the name (first 10 chars, uppercase)
+		short = strings.ToUpper(truncate(strings.ReplaceAll(xg.Name, " ", ""), 10))
+	}
+	if short == "" {
+		short = xg.ID
+		if len(short) > 10 {
+			short = short[:10]
+		}
+	}
+
+	_, err := e.db.GoodsGroups().UpdateOne(ctx,
+		bson.M{"tenantId": tenantID, "xentralId": xg.ID},
+		bson.M{
+			"$set": bson.M{
+				"name":      truncate(xg.Name, 100),
+				"short":     short,
+				"xentralId": xg.ID,
+				"updatedAt": now,
+			},
+			"$setOnInsert": bson.M{
+				"tenantId":  tenantID,
+				"xentralId": xg.ID,
+				"createdAt": now,
+			},
+		},
+		options.Update().SetUpsert(true),
+	)
+	return err
+}
+
+// -------------------------------------------------------------------
+// Targeted single-entity sync (for webhook-driven incremental updates)
+// -------------------------------------------------------------------
+
+// SyncSingleProduct syncs a single product from Xentral by Xentral ID.
+// Used by the webhook handler for fast incremental updates without a full list scan.
+func (e *Engine) SyncSingleProduct(ctx context.Context, tenantID primitive.ObjectID, client *Client, xentralID string) error {
+	article, err := client.GetArticle(ctx, xentralID)
+	if err != nil {
+		return fmt.Errorf("get article %s: %w", xentralID, err)
+	}
+	return e.upsertProduct(ctx, tenantID, *article)
+}
+
+// SyncSingleCustomer syncs a single customer from Xentral by Xentral ID.
+func (e *Engine) SyncSingleCustomer(ctx context.Context, tenantID primitive.ObjectID, client *Client, xentralID string) error {
+	customer, err := client.GetCustomer(ctx, xentralID)
+	if err != nil {
+		return fmt.Errorf("get customer %s: %w", xentralID, err)
+	}
+	return e.upsertCustomer(ctx, tenantID, *customer)
+}
+
+// SyncSingleSupplier syncs a single supplier from Xentral by Xentral ID.
+func (e *Engine) SyncSingleSupplier(ctx context.Context, tenantID primitive.ObjectID, client *Client, xentralID string) error {
+	supplier, err := client.GetSupplier(ctx, xentralID)
+	if err != nil {
+		return fmt.Errorf("get supplier %s: %w", xentralID, err)
+	}
+	return e.upsertSupplier(ctx, tenantID, *supplier)
+}
+
+// SyncSingleSalesOrder syncs a single sales order from Xentral by Xentral ID.
+func (e *Engine) SyncSingleSalesOrder(ctx context.Context, tenantID primitive.ObjectID, client *Client, xentralID string) error {
+	order, err := client.GetSalesOrder(ctx, xentralID)
+	if err != nil {
+		return fmt.Errorf("get sales order %s: %w", xentralID, err)
+	}
+	return e.upsertSalesOrder(ctx, tenantID, *order)
+}
+
+// SyncSinglePurchaseOrder syncs a single purchase order from Xentral by Xentral ID.
+func (e *Engine) SyncSinglePurchaseOrder(ctx context.Context, tenantID primitive.ObjectID, client *Client, xentralID string) error {
+	order, err := client.GetPurchaseOrder(ctx, xentralID)
+	if err != nil {
+		return fmt.Errorf("get purchase order %s: %w", xentralID, err)
+	}
+	return e.upsertOrder(ctx, tenantID, *order, client)
+}
+
+// -------------------------------------------------------------------
+// Bestellvorschläge – Purchase order suggestions engine
+// -------------------------------------------------------------------
+
+// GeneratePurchaseSuggestions analyses sales history (synced SalesOrder line items)
+// and current stock to produce per-product purchase recommendations.
+//
+// analysisDays: how many days of past sales to consider (e.g. 90)
+// targetDays:   desired days of stock coverage after reorder (e.g. 60)
+//
+// Results are stored in the purchase_suggestions collection (one row per product,
+// overwriting the previous open suggestion so the list stays clean).
+func (e *Engine) GeneratePurchaseSuggestions(ctx context.Context, tenantID primitive.ObjectID, analysisDays, targetDays int) ([]models.PurchaseSuggestion, error) {
+	if analysisDays <= 0 {
+		analysisDays = 90
+	}
+	if targetDays <= 0 {
+		targetDays = 60
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -analysisDays)
+
+	// 1. Aggregate quantity sold per product from SalesOrder line items.
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"tenantId": tenantID, "date": bson.M{"$gte": cutoff}}}},
+		{{Key: "$unwind", Value: "$lineItems"}},
+		{{Key: "$match", Value: bson.M{"lineItems.productId": bson.M{"$exists": true, "$ne": nil}}}},
+		{{Key: "$group", Value: bson.M{
+			"_id":       "$lineItems.productId",
+			"unitsSold": bson.M{"$sum": "$lineItems.quantity"},
+		}}},
+	}
+	cursor, err := e.db.SalesOrders().Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, fmt.Errorf("aggregate sales: %w", err)
+	}
+	defer cursor.Close(ctx)
+
+	type salesRow struct {
+		ProductID primitive.ObjectID `bson:"_id"`
+		UnitsSold float64            `bson:"unitsSold"`
+	}
+	var rows []salesRow
+	if err := cursor.All(ctx, &rows); err != nil {
+		return nil, fmt.Errorf("decode sales rows: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+
+	// 2. Build a map of productID → current stock from StockLevels.
+	productIDs := make([]primitive.ObjectID, 0, len(rows))
+	for _, r := range rows {
+		productIDs = append(productIDs, r.ProductID)
+	}
+
+	stockPipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"tenantId": tenantID, "productId": bson.M{"$in": productIDs}}}},
+		{{Key: "$group", Value: bson.M{
+			"_id":   "$productId",
+			"total": bson.M{"$sum": "$quantity"},
+		}}},
+	}
+	stockCursor, err := e.db.StockLevels().Aggregate(ctx, stockPipeline)
+	if err != nil {
+		return nil, fmt.Errorf("aggregate stocks: %w", err)
+	}
+	defer stockCursor.Close(ctx)
+
+	type stockRow struct {
+		ProductID primitive.ObjectID `bson:"_id"`
+		Total     float64            `bson:"total"`
+	}
+	var stockRows []stockRow
+	_ = stockCursor.All(ctx, &stockRows)
+
+	stockMap := make(map[primitive.ObjectID]float64, len(stockRows))
+	for _, s := range stockRows {
+		stockMap[s.ProductID] = s.Total
+	}
+
+	// 3. Look up default supplier per product.
+	supplierMap := make(map[primitive.ObjectID]*primitive.ObjectID, len(rows))
+	for _, r := range rows {
+		var p struct {
+			SupplierID *primitive.ObjectID `bson:"supplierId"`
+		}
+		if err := e.db.Products().FindOne(ctx, bson.M{"_id": r.ProductID}).Decode(&p); err == nil {
+			supplierMap[r.ProductID] = p.SupplierID
+		}
+	}
+
+	// 4. Build suggestions.
+	now := time.Now()
+	var suggestions []models.PurchaseSuggestion
+
+	for _, r := range rows {
+		avgDaily := r.UnitsSold / float64(analysisDays)
+		if avgDaily <= 0 {
+			continue
+		}
+		currentStock := stockMap[r.ProductID]
+		if currentStock < 0 {
+			currentStock = 0
+		}
+		daysOfStock := currentStock / avgDaily
+		if daysOfStock >= float64(targetDays) {
+			continue // stock sufficient, skip
+		}
+		suggestedQty := int(math.Ceil((float64(targetDays)-daysOfStock) * avgDaily))
+		if suggestedQty <= 0 {
+			continue
+		}
+
+		sugg := models.PurchaseSuggestion{
+			ID:            primitive.NewObjectID(),
+			TenantID:      tenantID,
+			ProductID:     r.ProductID,
+			SupplierID:    supplierMap[r.ProductID],
+			AnalysisDays:  analysisDays,
+			UnitsSold:     r.UnitsSold,
+			AvgDailySales: avgDaily,
+			CurrentStock:  currentStock,
+			DaysOfStock:   daysOfStock,
+			SuggestedQty:  suggestedQty,
+			TargetDays:    targetDays,
+			Status:        "open",
+			GeneratedAt:   now,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		suggestions = append(suggestions, sugg)
+
+		// Upsert: one open suggestion per product (overwrite previous open suggestions).
+		_, _ = e.db.PurchaseSuggestions().UpdateOne(ctx,
+			bson.M{"tenantId": tenantID, "productId": r.ProductID, "status": "open"},
+			bson.M{
+				"$set": bson.M{
+					"supplierId":    sugg.SupplierID,
+					"analysisDays":  analysisDays,
+					"unitsSold":     r.UnitsSold,
+					"avgDailySales": avgDaily,
+					"currentStock":  currentStock,
+					"daysOfStock":   daysOfStock,
+					"suggestedQty":  suggestedQty,
+					"targetDays":    targetDays,
+					"generatedAt":   now,
+					"updatedAt":     now,
+				},
+				"$setOnInsert": bson.M{
+					"_id":       sugg.ID,
+					"tenantId":  tenantID,
+					"productId": r.ProductID,
+					"status":    "open",
+					"createdAt": now,
+				},
+			},
+			options.Update().SetUpsert(true),
+		)
+	}
+
+	return suggestions, nil
+}
+
+// -------------------------------------------------------------------
+// Outbound purchase price push (LastSaaS → Xentral)
+// -------------------------------------------------------------------
+
+// PushPurchasePriceToXentral creates or updates an EK price entry in Xentral
+// for the given ProductPriceList record. Call this when an EK price is confirmed
+// (e.g. after a purchase order is received) or when a pre-calculated EK with a
+// known validity period should be forwarded to Xentral.
+//
+// If the price entry already has a Xentral mapping, the existing Xentral price
+// is patched. Otherwise a new price record is created in Xentral.
+func (e *Engine) PushPurchasePriceToXentral(ctx context.Context, tenantID, priceListID primitive.ObjectID, client *Client) (string, error) {
+	var price models.ProductPriceList
+	if err := e.db.ProductPriceLists().FindOne(ctx, bson.M{"_id": priceListID, "tenantId": tenantID}).Decode(&price); err != nil {
+		return "", fmt.Errorf("load price list entry: %w", err)
+	}
+
+	xProductID := e.resolveXentralID(ctx, tenantID, "product", &price.ProductID)
+	if xProductID == "" {
+		return "", fmt.Errorf("product not mapped to Xentral – sync products first")
+	}
+
+	req := XPurchasePriceCreateRequest{
+		Product:  XPORef{ID: xProductID},
+		Price:    price.Price,
+		Currency: price.Currency,
+		Name:     price.Name,
+	}
+	if price.Quantity > 0 {
+		req.FromQuantity = float64(price.Quantity)
+	}
+	if price.SupplierID != nil {
+		xSupplierID := e.resolveXentralID(ctx, tenantID, "supplier", price.SupplierID)
+		if xSupplierID != "" {
+			req.Supplier = &XPORef{ID: xSupplierID}
+		}
+	}
+	if price.ValidFrom != nil {
+		req.ValidFrom = price.ValidFrom.Format("2006-01-02")
+	}
+	if price.ValidTo != nil {
+		req.ExpiresAt = price.ValidTo.Format("2006-01-02")
+	}
+
+	// Check for existing Xentral mapping for this price entry.
+	var mapping models.XentralMapping
+	err := e.db.XentralMappings().FindOne(ctx, bson.M{
+		"tenantId": tenantID,
+		"entity":   "purchase_price",
+		"localId":  priceListID,
+	}).Decode(&mapping)
+
+	now := time.Now()
+
+	if err == mongo.ErrNoDocuments {
+		xID, createErr := client.CreatePurchasePrice(ctx, req)
+		if createErr != nil {
+			return "", fmt.Errorf("create purchase price in Xentral: %w", createErr)
+		}
+		_, _ = e.db.XentralMappings().InsertOne(ctx, models.XentralMapping{
+			ID:        primitive.NewObjectID(),
+			TenantID:  tenantID,
+			Entity:    "purchase_price",
+			LocalID:   priceListID,
+			XentralID: xID,
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+		return xID, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("lookup mapping: %w", err)
+	}
+
+	if patchErr := client.PatchXentralPurchasePrice(ctx, mapping.XentralID, req); patchErr != nil {
+		return "", fmt.Errorf("patch purchase price in Xentral: %w", patchErr)
+	}
+	_, _ = e.db.XentralMappings().UpdateOne(ctx,
+		bson.M{"_id": mapping.ID},
+		bson.M{"$set": bson.M{"updatedAt": now}},
+	)
+	return mapping.XentralID, nil
 }

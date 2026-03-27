@@ -143,10 +143,11 @@ type XArticle struct {
 	Active           bool            `json:"active"`           // fallback
 	UpdatedAt        string          `json:"updatedAt"`
 	// v2: tags, free fields and variant options
-	Tags            []XTag           `json:"tags"`            // Schlagworte
-	FreeFields      []XV2FreeField   `json:"freeFields"`      // v2 Freifelder
-	SelectedOptions []XV2Option      `json:"selectedOptions"` // v2 Eigenschaften (Varianten)
-	Options         []XV2Option      `json:"options"`         // v2 Eigenschaften (Matrixprodukt)
+	Tags             []XTag          `json:"tags"`             // Schlagworte
+	FreeFields       []XV2FreeField  `json:"freeFields"`       // v2 Freifelder
+	SelectedOptions  []XV2Option     `json:"selectedOptions"`  // v2 Eigenschaften (Varianten)
+	Options          []XV2Option     `json:"options"`          // v2 Eigenschaften (Matrixprodukt)
+	MerchandiseGroup XEntityRef      `json:"merchandiseGroup"` // v2: {id, name}
 	// v1 fallback fields
 	Characteristics []XCharacteristic `json:"characteristics"`
 	Properties      []XCharacteristic `json:"properties"`
@@ -1305,4 +1306,291 @@ type XSOAmount struct {
 func (a XSOAmount) Float64() float64 {
 	f, _ := a.Amount.Float64()
 	return f
+}
+
+// -------------------------------------------------------------------
+// Merchandise Groups (Warengruppen)
+// -------------------------------------------------------------------
+
+// XMerchandiseGroup represents a product merchandise group (Warengruppe) from Xentral.
+// Endpoint: GET /api/v1/productsMerchandiseGroups
+type XMerchandiseGroup struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Number   string `json:"number"`
+	ParentID string `json:"parentId"`
+}
+
+// ListMerchandiseGroups fetches all merchandise groups (Warengruppen) from Xentral.
+func (c *Client) ListMerchandiseGroups(ctx context.Context) ([]XMerchandiseGroup, error) {
+	var all []XMerchandiseGroup
+	for page := 1; ; page++ {
+		batch, err := listPage[XMerchandiseGroup](c, ctx, "/api/v1/productsMerchandiseGroups", page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < pageSize {
+			break
+		}
+	}
+	return all, nil
+}
+
+// CreateMerchandiseGroup creates a new merchandise group in Xentral.
+// Returns the Xentral ID of the newly created group.
+func (c *Client) CreateMerchandiseGroup(ctx context.Context, name, number string) (string, error) {
+	payload := map[string]string{"name": name, "number": number}
+	body, err := c.postJSON(ctx, "/api/v1/productsMerchandiseGroups", payload)
+	if err != nil {
+		return "", err
+	}
+	var resp struct {
+		Data struct{ ID string `json:"id"` } `json:"data"`
+		ID   string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return "", fmt.Errorf("xentral: parse create merchandise group response: %w", err)
+	}
+	if resp.Data.ID != "" {
+		return resp.Data.ID, nil
+	}
+	return resp.ID, nil
+}
+
+// -------------------------------------------------------------------
+// Product positions (per-product order history)
+// -------------------------------------------------------------------
+
+// XProductOrderPosition represents a line item linking a product to a purchase or sales order.
+// Used by /api/v1/products/{id}/purchaseOrdersPositions and /api/v1/products/{id}/salesOrdersPositions.
+type XProductOrderPosition struct {
+	ID         string     `json:"id"`
+	Article    XEntityRef `json:"article"`
+	Quantity   float64    `json:"quantity"`
+	UnitPrice  float64    `json:"unitPrice"`
+	TotalPrice float64    `json:"totalPrice"`
+	Document   XEntityRef `json:"document"` // order/sales order reference
+	Date       string     `json:"date"`
+}
+
+// GetProductPurchaseOrderPositions fetches all purchase order positions for a single product.
+// Endpoint: GET /api/v1/products/{id}/purchaseOrdersPositions
+func (c *Client) GetProductPurchaseOrderPositions(ctx context.Context, xentralProductID string) ([]XProductOrderPosition, error) {
+	var all []XProductOrderPosition
+	for page := 1; ; page++ {
+		batch, err := listPage[XProductOrderPosition](c, ctx, "/api/v1/products/"+xentralProductID+"/purchaseOrdersPositions", page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < pageSize {
+			break
+		}
+	}
+	return all, nil
+}
+
+// GetProductSalesOrderPositions fetches all sales order positions for a single product.
+// Endpoint: GET /api/v1/products/{id}/salesOrdersPositions
+func (c *Client) GetProductSalesOrderPositions(ctx context.Context, xentralProductID string) ([]XProductOrderPosition, error) {
+	var all []XProductOrderPosition
+	for page := 1; ; page++ {
+		batch, err := listPage[XProductOrderPosition](c, ctx, "/api/v1/products/"+xentralProductID+"/salesOrdersPositions", page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < pageSize {
+			break
+		}
+	}
+	return all, nil
+}
+
+// -------------------------------------------------------------------
+// Product properties (per-product Eigenschaften definitions)
+// -------------------------------------------------------------------
+
+// XProductPropertyDef represents a property definition for a specific product.
+// Endpoint: GET /api/v1/products/{id}/properties
+type XProductPropertyDef struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// GetProductProperties fetches property definitions for a single product.
+// Endpoint: GET /api/v1/products/{id}/properties
+func (c *Client) GetProductProperties(ctx context.Context, xentralProductID string) ([]XProductPropertyDef, error) {
+	body, _, err := c.do(ctx, "/api/v1/products/"+xentralProductID+"/properties", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result xList[XProductPropertyDef]
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("xentral: decode product properties: %w", err)
+	}
+	return result.Data, nil
+}
+
+// -------------------------------------------------------------------
+// Global free field definitions
+// -------------------------------------------------------------------
+
+// XProductFreeFieldDef is a global free field definition from /api/v1/productsFreeFields.
+type XProductFreeFieldDef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"` // "text", "date", etc.
+}
+
+// ListProductFreeFields fetches all free field definitions from Xentral.
+// These are the tenant-wide label/type definitions for Freifelder 1–40.
+// Endpoint: GET /api/v1/productsFreeFields
+func (c *Client) ListProductFreeFields(ctx context.Context) ([]XProductFreeFieldDef, error) {
+	body, _, err := c.do(ctx, "/api/v1/productsFreeFields", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result xList[XProductFreeFieldDef]
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("xentral: decode productsFreeFields: %w", err)
+	}
+	return result.Data, nil
+}
+
+// -------------------------------------------------------------------
+// Single-entity GET methods (for targeted webhook sync)
+// -------------------------------------------------------------------
+
+// GetCustomer fetches a single customer by Xentral ID.
+// Endpoint: GET /api/v1/customers/{id}
+func (c *Client) GetCustomer(ctx context.Context, xentralID string) (*XCustomer, error) {
+	body, _, err := c.do(ctx, "/api/v1/customers/"+xentralID, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Data XCustomer `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("xentral: decode customer %s: %w", xentralID, err)
+	}
+	if result.Data.ID == "" {
+		// Some endpoints return the object directly without a data wrapper
+		var direct XCustomer
+		if err2 := json.Unmarshal(body, &direct); err2 == nil && direct.ID != "" {
+			return &direct, nil
+		}
+	}
+	return &result.Data, nil
+}
+
+// GetSupplier fetches a single supplier by Xentral ID.
+// Endpoint: GET /api/v1/suppliers/{id}
+func (c *Client) GetSupplier(ctx context.Context, xentralID string) (*XSupplier, error) {
+	body, _, err := c.do(ctx, "/api/v1/suppliers/"+xentralID, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Data XSupplier `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("xentral: decode supplier %s: %w", xentralID, err)
+	}
+	if result.Data.ID == "" {
+		var direct XSupplier
+		if err2 := json.Unmarshal(body, &direct); err2 == nil && direct.ID != "" {
+			return &direct, nil
+		}
+	}
+	return &result.Data, nil
+}
+
+// GetSalesOrder fetches a single sales order by Xentral ID.
+// Endpoint: GET /api/v3/salesOrders/{id}
+func (c *Client) GetSalesOrder(ctx context.Context, xentralID string) (*XSalesOrder, error) {
+	body, _, err := c.do(ctx, "/api/v3/salesOrders/"+xentralID, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Data XSalesOrder `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("xentral: decode sales order %s: %w", xentralID, err)
+	}
+	if result.Data.ID == "" {
+		var direct XSalesOrder
+		if err2 := json.Unmarshal(body, &direct); err2 == nil && direct.ID != "" {
+			return &direct, nil
+		}
+	}
+	return &result.Data, nil
+}
+
+// GetPurchaseOrder fetches a single purchase order by Xentral ID.
+// Endpoint: GET /api/v3/purchaseOrders/{id}
+func (c *Client) GetPurchaseOrder(ctx context.Context, xentralID string) (*XPurchaseOrder, error) {
+	body, _, err := c.do(ctx, "/api/v3/purchaseOrders/"+xentralID, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Data XPurchaseOrder `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("xentral: decode purchase order %s: %w", xentralID, err)
+	}
+	if result.Data.ID == "" {
+		var direct XPurchaseOrder
+		if err2 := json.Unmarshal(body, &direct); err2 == nil && direct.ID != "" {
+			return &direct, nil
+		}
+	}
+	return &result.Data, nil
+}
+
+// -------------------------------------------------------------------
+// Outbound purchase price push (LastSaaS → Xentral)
+// -------------------------------------------------------------------
+
+// XPurchasePriceCreateRequest is the body for POST/PATCH on /api/v1/purchasePrices.
+type XPurchasePriceCreateRequest struct {
+	Product      XPORef  `json:"product"`
+	Supplier     *XPORef `json:"supplier,omitempty"`
+	Price        float64 `json:"price"`
+	Currency     string  `json:"currency,omitempty"`
+	FromQuantity float64 `json:"fromQuantity,omitempty"`
+	ValidFrom    string  `json:"validFrom,omitempty"`  // "YYYY-MM-DD"
+	ExpiresAt    string  `json:"expiresAt,omitempty"`  // "YYYY-MM-DD"
+	Name         string  `json:"name,omitempty"`
+}
+
+// CreatePurchasePrice pushes a new EK price to Xentral.
+// Endpoint: POST /api/v1/purchasePrices
+func (c *Client) CreatePurchasePrice(ctx context.Context, req XPurchasePriceCreateRequest) (string, error) {
+	body, err := c.postJSON(ctx, "/api/v1/purchasePrices", req)
+	if err != nil {
+		return "", err
+	}
+	var resp struct {
+		Data struct{ ID string `json:"id"` } `json:"data"`
+		ID   string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return "", fmt.Errorf("xentral: parse create purchase price response: %w", err)
+	}
+	if resp.Data.ID != "" {
+		return resp.Data.ID, nil
+	}
+	return resp.ID, nil
+}
+
+// PatchXentralPurchasePrice updates an existing EK price in Xentral.
+// Endpoint: PATCH /api/v1/purchasePrices/{id}
+func (c *Client) PatchXentralPurchasePrice(ctx context.Context, xentralID string, req XPurchasePriceCreateRequest) error {
+	return c.patch(ctx, "/api/v1/purchasePrices/"+xentralID, req)
 }

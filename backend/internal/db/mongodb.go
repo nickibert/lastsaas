@@ -648,3 +648,7 @@ func (m *MongoDB) EANRanges() *mongo.Collection {
 func (m *MongoDB) ProductFreefieldDefs() *mongo.Collection {
 	return m.Database.Collection("product_freefield_defs")
 }
+
+func (m *MongoDB) PurchaseSuggestions() *mongo.Collection {
+	return m.Database.Collection("purchase_suggestions")
+}

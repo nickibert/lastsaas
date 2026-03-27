@@ -48,6 +48,11 @@ func (h *XentralHandler) RegisterRoutes(s *mux.Router) {
 	ix.HandleFunc("/logs", h.listLogs).Methods(http.MethodGet)
 	ix.HandleFunc("/mappings", h.listMappings).Methods(http.MethodGet)
 	ix.HandleFunc("/import-account", h.importAccount).Methods(http.MethodPost)
+	// Bestellvorschläge (purchase suggestions)
+	ix.HandleFunc("/purchase-suggestions", h.listPurchaseSuggestions).Methods(http.MethodGet)
+	ix.HandleFunc("/purchase-suggestions/generate", h.generatePurchaseSuggestions).Methods(http.MethodPost)
+	// Outbound purchase price push
+	ix.HandleFunc("/push-purchase-price/{priceId}", h.pushPurchasePrice).Methods(http.MethodPost)
 	// Webhook receiver – authenticated by token embedded in the URL.
 	// Register on the parent router (no tenant auth middleware) so Xentral can call it.
 	s.HandleFunc("/integrations/xentral/webhook/{token}", h.receiveWebhook).Methods(http.MethodPost)
@@ -290,6 +295,7 @@ func (h *XentralHandler) triggerSyncAll(w http.ResponseWriter, r *http.Request) 
 	//   push_orders       → pushes local orders into Xentral
 	syncOrder := []string{
 		// Phase 1
+		"merchandise_groups", // must be first so products can link to them
 		"suppliers",
 		"customers",
 		"products",
@@ -502,6 +508,12 @@ func (h *XentralHandler) runSync(ctx context.Context, tenantID primitive.ObjectI
 	var log models.XentralSyncLog
 
 	switch entity {
+	case "merchandise_groups":
+		if !cfg.SyncProducts { // reuse SyncProducts flag as gate for merchandise groups
+			return skippedLog(tenantID, entity)
+		}
+		log = h.engine.SyncMerchandiseGroups(ctx, tenantID, client)
+		h.db.XentralConfigs().UpdateOne(ctx, bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncMerchandiseGroups": now}}) //nolint
 	case "products":
 		if !cfg.SyncProducts {
 			return skippedLog(tenantID, entity)
@@ -626,25 +638,53 @@ func (h *XentralHandler) receiveWebhook(w http.ResponseWriter, r *http.Request) 
 	}
 
 	client := xentral.NewClient(cfg.BaseURL, cfg.APIToken)
+	tenantID := cfg.TenantID
+	resourceID := payload.ResourceID
 
-	// Map the Xentral event type to a sync entity and trigger a targeted sync.
-	// Run in a goroutine so the webhook response is fast (Xentral has short timeouts).
+	// Targeted incremental sync: use resourceId when present to sync only the changed
+	// entity. If resourceId is missing fall back to a full entity list sync.
+	// Run in a goroutine so the HTTP response is returned immediately (Xentral expects
+	// a fast 200 acknowledgement; our detail fetches can take seconds).
 	go func() {
+		wCtx, wCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer wCancel()
 		switch {
 		case isEventType(payload.Event, "product"):
-			h.engine.SyncProducts(r.Context(), cfg.TenantID, client) //nolint
+			if resourceID != "" {
+				h.engine.SyncSingleProduct(wCtx, tenantID, client, resourceID) //nolint
+			} else {
+				h.engine.SyncProducts(wCtx, tenantID, client) //nolint
+			}
 		case isEventType(payload.Event, "customer"):
-			h.engine.SyncCustomers(r.Context(), cfg.TenantID, client) //nolint
+			if resourceID != "" {
+				h.engine.SyncSingleCustomer(wCtx, tenantID, client, resourceID) //nolint
+			} else {
+				h.engine.SyncCustomers(wCtx, tenantID, client) //nolint
+			}
 		case isEventType(payload.Event, "supplier"):
-			h.engine.SyncSuppliers(r.Context(), cfg.TenantID, client) //nolint
+			if resourceID != "" {
+				h.engine.SyncSingleSupplier(wCtx, tenantID, client, resourceID) //nolint
+			} else {
+				h.engine.SyncSuppliers(wCtx, tenantID, client) //nolint
+			}
 		case isEventType(payload.Event, "purchaseOrder"):
-			h.engine.SyncOrders(r.Context(), cfg.TenantID, client) //nolint
+			if resourceID != "" {
+				h.engine.SyncSinglePurchaseOrder(wCtx, tenantID, client, resourceID) //nolint
+			} else {
+				h.engine.SyncOrders(wCtx, tenantID, client) //nolint
+			}
 		case isEventType(payload.Event, "salesOrder"):
-			h.engine.SyncSalesOrders(r.Context(), cfg.TenantID, client) //nolint
+			if resourceID != "" {
+				h.engine.SyncSingleSalesOrder(wCtx, tenantID, client, resourceID) //nolint
+			} else {
+				h.engine.SyncSalesOrders(wCtx, tenantID, client) //nolint
+			}
 		case isEventType(payload.Event, "purchasePrice"):
-			h.engine.SyncPurchasePrices(r.Context(), cfg.TenantID, client) //nolint
+			h.engine.SyncPurchasePrices(wCtx, tenantID, client) //nolint
 		case isEventType(payload.Event, "salesPrice"):
-			h.engine.SyncSalesPrices(r.Context(), cfg.TenantID, client) //nolint
+			h.engine.SyncSalesPrices(wCtx, tenantID, client) //nolint
+		case isEventType(payload.Event, "merchandiseGroup"):
+			h.engine.SyncMerchandiseGroups(wCtx, tenantID, client) //nolint
 		}
 	}()
 
@@ -664,3 +704,105 @@ func errorf(msg string) error {
 type simpleErr struct{ msg string }
 
 func (e *simpleErr) Error() string { return e.msg }
+
+// ---------------------------------------------------------------------------
+// GET /integrations/xentral/purchase-suggestions
+// ---------------------------------------------------------------------------
+
+func (h *XentralHandler) listPurchaseSuggestions(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	filter := bson.M{"tenantId": tenantID}
+	if status := r.URL.Query().Get("status"); status != "" {
+		filter["status"] = status
+	}
+
+	cursor, err := h.db.PurchaseSuggestions().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "generatedAt", Value: -1}}).SetLimit(500),
+	)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	var suggestions []models.PurchaseSuggestion
+	cursor.All(r.Context(), &suggestions) //nolint
+	if suggestions == nil {
+		suggestions = []models.PurchaseSuggestion{}
+	}
+	writeJSON(w, http.StatusOK, suggestions)
+}
+
+// ---------------------------------------------------------------------------
+// POST /integrations/xentral/purchase-suggestions/generate
+// ---------------------------------------------------------------------------
+
+func (h *XentralHandler) generatePurchaseSuggestions(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		AnalysisDays int `json:"analysisDays"` // default 90
+		TargetDays   int `json:"targetDays"`   // default 60
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.AnalysisDays <= 0 {
+		req.AnalysisDays = 90
+	}
+	if req.TargetDays <= 0 {
+		req.TargetDays = 60
+	}
+
+	suggestions, err := h.engine.GeneratePurchaseSuggestions(r.Context(), tenantID, req.AnalysisDays, req.TargetDays)
+	if err != nil {
+		http.Error(w, "generation failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if suggestions == nil {
+		suggestions = []models.PurchaseSuggestion{}
+	}
+	h.syslog.Log(r.Context(), "low", "purchase suggestions generated")
+	writeJSON(w, http.StatusOK, suggestions)
+}
+
+// ---------------------------------------------------------------------------
+// POST /integrations/xentral/push-purchase-price/{priceId}
+// Pushes a single ProductPriceList (EK) entry to Xentral.
+// Used when confirming a purchase price after goods arrival or pre-calculating EK.
+// ---------------------------------------------------------------------------
+
+func (h *XentralHandler) pushPurchasePrice(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	priceIDStr := mux.Vars(r)["priceId"]
+	priceID, err := primitive.ObjectIDFromHex(priceIDStr)
+	if err != nil {
+		http.Error(w, "invalid priceId", http.StatusBadRequest)
+		return
+	}
+
+	_, client, err := h.loadClient(r, tenantID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	xentralID, pushErr := h.engine.PushPurchasePriceToXentral(r.Context(), tenantID, priceID, client)
+	if pushErr != nil {
+		http.Error(w, pushErr.Error(), http.StatusBadGateway)
+		return
+	}
+
+	h.syslog.Log(r.Context(), "medium", "purchase price pushed to Xentral: "+xentralID)
+	writeJSON(w, http.StatusOK, map[string]string{"xentralId": xentralID})
+}
