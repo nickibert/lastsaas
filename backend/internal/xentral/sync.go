@@ -44,12 +44,17 @@ func (e *Engine) SyncProducts(ctx context.Context, tenantID primitive.ObjectID, 
 		return e.failLog(ctx, log, err.Error())
 	}
 
-	for _, a := range articles {
-		if err := e.upsertProduct(ctx, tenantID, a); err != nil {
-			log.Errors = append(log.Errors, fmt.Sprintf("%s: %v", a.ID, err))
+	for _, summary := range articles {
+		// The list endpoint omits freeFields and selectedOptions; fetch full detail per product.
+		detail, err := client.GetArticle(ctx, summary.ID)
+		if err != nil {
+			// Fall back to the list summary if the detail fetch fails (e.g. rate limit or 404).
+			detail = &summary
+		}
+		if err := e.upsertProduct(ctx, tenantID, *detail); err != nil {
+			log.Errors = append(log.Errors, fmt.Sprintf("%s: %v", summary.ID, err))
 			log.Skipped++
 		} else {
-			// distinguish create vs update via mapping existence check (already done in upsertProduct)
 			log.Updated++
 		}
 	}

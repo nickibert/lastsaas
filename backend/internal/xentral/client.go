@@ -637,6 +637,8 @@ func listPage[T any](c *Client, ctx context.Context, path string, pageNum int) (
 }
 
 // ListArticles fetches all articles from Xentral across all pages using the v2 API.
+// Note: the list endpoint returns summary data only; freeFields are fetched separately
+// via GetArticle for each product that needs syncing.
 func (c *Client) ListArticles(ctx context.Context) ([]XArticle, error) {
 	var all []XArticle
 	for page := 1; ; page++ {
@@ -650,6 +652,23 @@ func (c *Client) ListArticles(ctx context.Context) ([]XArticle, error) {
 		}
 	}
 	return all, nil
+}
+
+// GetArticle fetches the full detail of a single product from the v2 API.
+// The detail endpoint includes freeFields (with translations) and selectedOptions
+// that may be omitted from the list response.
+func (c *Client) GetArticle(ctx context.Context, xentralID string) (*XArticle, error) {
+	body, _, err := c.do(ctx, "/api/v2/products/"+xentralID, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Data XArticle `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("xentral: decode product %s: %w", xentralID, err)
+	}
+	return &result.Data, nil
 }
 
 // ListCustomers fetches all customers from Xentral across all pages.
