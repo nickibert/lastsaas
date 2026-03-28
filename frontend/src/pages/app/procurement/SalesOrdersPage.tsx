@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, ChevronUp, Search } from 'lucide-react';
-import { salesOrdersApi, type SalesOrder } from '../../../api/procurement';
+import { salesOrdersApi } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
 import { Pagination } from '../../../components/Pagination';
 import { useLocalStorage } from '../../../hooks/useLocalStorage';
