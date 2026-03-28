@@ -252,8 +252,13 @@ func (h *XentralHandler) triggerSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Use a detached context so the sync is not cancelled when the HTTP
-	// connection drops (large catalogs can take several minutes).
-	syncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	// connection drops. Products require one detail API call per item (N+1),
+	// so allow up to 8h; all other entities get 2h.
+	timeout := 2 * time.Hour
+	if entity == "products" {
+		timeout = 8 * time.Hour
+	}
+	syncCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	log := h.runSync(syncCtx, tenantID, entity, cfg, client)
 	writeJSON(w, http.StatusOK, log)

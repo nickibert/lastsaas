@@ -19,6 +19,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/gorilla/mux"
@@ -210,6 +211,10 @@ func (h *ProcurementHandler) RegisterRoutes(r *mux.Router, authMW mux.Middleware
 
 	// Stock levels (Lagerbestand)
 	s.HandleFunc("/stock/levels", h.listStockLevels).Methods(http.MethodGet)
+
+	// Sales orders (Verkaufsaufträge – synced from Xentral; read-only in UI)
+	s.HandleFunc("/sales-orders", h.listSalesOrders).Methods(http.MethodGet)
+	s.HandleFunc("/sales-orders/{id}", h.getSalesOrder).Methods(http.MethodGet)
 
 	// Xentral ERP integration
 	NewXentralHandler(h.db, h.syslog).RegisterRoutes(s)
@@ -3365,4 +3370,72 @@ func (h *ProcurementHandler) deleteStorageLocation(w http.ResponseWriter, r *htt
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------------------
+// Sales Orders (Verkaufsaufträge – synced from Xentral, read-only)
+// ---------------------------------------------------------------------------
+
+func (h *ProcurementHandler) listSalesOrders(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	filter := bson.M{"tenantId": tenantID}
+	if q := r.URL.Query().Get("q"); q != "" {
+		filter["$or"] = bson.A{
+			bson.M{"xentralDocumentNr": bson.M{"$regex": q, "$options": "i"}},
+			bson.M{"externalOrderNr": bson.M{"$regex": q, "$options": "i"}},
+		}
+	}
+	if status := r.URL.Query().Get("status"); status != "" {
+		filter["status"] = status
+	}
+
+	page, limit, skip := parsePagination(r)
+
+	sortKey := "date"
+	sortDir := int32(-1)
+
+	total, _ := h.db.SalesOrders().CountDocuments(r.Context(), filter)
+	cursor, err := h.db.SalesOrders().Find(r.Context(), filter,
+		options.Find().
+			SetSort(bson.D{{Key: sortKey, Value: sortDir}}).
+			SetSkip(skip).SetLimit(limit))
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	results := make([]models.SalesOrder, 0)
+	cursor.All(r.Context(), &results) //nolint
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": results,
+		"total": total,
+		"page":  page,
+		"pages": (total + limit - 1) / limit,
+	})
+}
+
+func (h *ProcurementHandler) getSalesOrder(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, err := primitive.ObjectIDFromHex(mux.Vars(r)["id"])
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var so models.SalesOrder
+	if err := h.db.SalesOrders().FindOne(r.Context(), bson.M{"_id": id, "tenantId": tenantID}).Decode(&so); err != nil {
+		if err == mongo.ErrNoDocuments {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, so)
 }

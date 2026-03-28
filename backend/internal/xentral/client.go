@@ -704,11 +704,23 @@ func (c *Client) ListSuppliers(ctx context.Context) ([]XSupplier, error) {
 	return all, nil
 }
 
-// ListPurchaseOrders fetches all purchase orders (Lieferantenbestellungen) from
-// Xentral using cursor pagination (x-pagination header). LineItems are included
-// in the list response by the v3 API.
+// ListPurchaseOrders fetches all purchase orders (Lieferantenbestellungen) from Xentral
+// using page-based pagination (same page[number]+page[size] approach as v1 endpoints).
+// The cursor-based x-pagination header from the original implementation did not work
+// with the Xentral v3 API — it only returned the first page.
 func (c *Client) ListPurchaseOrders(ctx context.Context) ([]XPurchaseOrder, error) {
-	return listAllCursor[XPurchaseOrder](c, ctx, "/api/v3/purchaseOrders")
+	var all []XPurchaseOrder
+	for page := 1; ; page++ {
+		batch, err := listPage[XPurchaseOrder](c, ctx, "/api/v3/purchaseOrders", page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < pageSize {
+			break
+		}
+	}
+	return all, nil
 }
 
 // ListPurchaseOrderLineItems fetches all line items for a single purchase order.
@@ -719,10 +731,21 @@ func (c *Client) ListPurchaseOrderLineItems(ctx context.Context, orderID string)
 }
 
 // ListSalesOrders fetches all sales orders (Verkaufsaufträge) from Xentral
-// using cursor pagination (x-pagination header).
-// The v3 salesOrders endpoint requires the feature flag "api-v3-sales-orders" on the instance.
+// using page-based pagination. The v3 salesOrders endpoint requires the feature
+// flag "api-v3-sales-orders" on the Xentral instance.
 func (c *Client) ListSalesOrders(ctx context.Context) ([]XSalesOrder, error) {
-	return listAllCursor[XSalesOrder](c, ctx, "/api/v3/salesOrders")
+	var all []XSalesOrder
+	for page := 1; ; page++ {
+		batch, err := listPage[XSalesOrder](c, ctx, "/api/v3/salesOrders", page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < pageSize {
+			break
+		}
+	}
+	return all, nil
 }
 
 // ListWarehouses fetches all warehouses (Lagerorte) from Xentral.

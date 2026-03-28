@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
-import { ShoppingCart, Package, Users, Ship, Anchor, Box, Globe, Tag, Gift, CalendarDays, UserCheck, Warehouse, MapPin, Settings, Link2 } from 'lucide-react';
+import { ShoppingCart, Package, Users, Ship, Anchor, Box, Globe, Tag, Gift, CalendarDays, UserCheck, Warehouse, MapPin, Settings, Link2, ClipboardList } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { ordersApi, productsApi, suppliersApi, freightCarriersApi, harboursApi, containersApi, countriesApi, goodsGroupsApi, offersApi, customersApi, stockApi, warehousesApi } from '../../../api/procurement';
+import { ordersApi, productsApi, suppliersApi, freightCarriersApi, harboursApi, containersApi, countriesApi, goodsGroupsApi, offersApi, customersApi, stockApi, warehousesApi, salesOrdersApi } from '../../../api/procurement';
 import { useTenant } from '../../../contexts/TenantContext';
 
 export default function ProcurementPage() {
@@ -19,6 +19,7 @@ export default function ProcurementPage() {
   const { data: customersData } = useQuery({ queryKey: ['customers', 1, 1], queryFn: () => customersApi.list(undefined, 1, 1), enabled, throwOnError: false });
   const { data: stockData } = useQuery({ queryKey: ['stock-levels', 1, 1], queryFn: () => stockApi.listLevels({ page: 1, limit: 1 }), enabled, throwOnError: false });
   const { data: warehousesData } = useQuery({ queryKey: ['warehouses', '', '', 1, 1], queryFn: () => warehousesApi.list(undefined, undefined, undefined, 1, 1), enabled, throwOnError: false });
+  const { data: salesOrdersData } = useQuery({ queryKey: ['sales-orders', '', '', 1, 1], queryFn: () => salesOrdersApi.list(undefined, undefined, 1, 1), enabled, throwOnError: false });
 
   const tiles = [
     {
@@ -28,6 +29,14 @@ export default function ProcurementPage() {
       to: '/procurement/orders',
       color: 'text-primary-400',
       bg: 'bg-primary-500/20',
+    },
+    {
+      icon: ClipboardList,
+      label: 'Verkaufsaufträge',
+      count: salesOrdersData?.total ?? null,
+      to: '/procurement/sales-orders',
+      color: 'text-orange-400',
+      bg: 'bg-orange-500/20',
     },
     {
       icon: Package,

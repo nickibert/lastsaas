@@ -44,6 +44,7 @@ const ProcurementConfigPage = lazy(() => import('./pages/app/procurement/Procure
 const XentralPage = lazy(() => import('./pages/app/procurement/XentralPage'));
 const WarehousesPage = lazy(() => import('./pages/app/procurement/WarehousesPage'));
 const StorageLocationsPage = lazy(() => import('./pages/app/procurement/StorageLocationsPage'));
+const SalesOrdersPage = lazy(() => import('./pages/app/procurement/SalesOrdersPage'));
 
 // App pages (eager — core experience)
 import DashboardPage from './pages/app/DashboardPage';
@@ -200,6 +201,7 @@ export default function App() {
                         <Route path="/procurement/xentral" element={<Suspense fallback={<LazyFallback />}><XentralPage /></Suspense>} />
                         <Route path="/procurement/warehouses" element={<Suspense fallback={<LazyFallback />}><WarehousesPage /></Suspense>} />
                         <Route path="/procurement/storage-locations" element={<Suspense fallback={<LazyFallback />}><StorageLocationsPage /></Suspense>} />
+                        <Route path="/procurement/sales-orders" element={<Suspense fallback={<LazyFallback />}><SalesOrdersPage /></Suspense>} />
                         <Route path="/messages" element={<Suspense fallback={<LazyFallback />}><AdminMessagesPage /></Suspense>} />
                       </Route>
 

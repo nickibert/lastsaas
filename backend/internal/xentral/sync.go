@@ -152,11 +152,21 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 		"description": a.Description,
 		"weightKg":    a.ResolvedWeight(),
 		"tags":        tags,
-		"attributes":  attrs,
 		"xentralNr":   truncate(articleNr, 50),
 		"active":      active,
-		"freeFields":  freeFields,
 		"updatedAt":   now,
+	}
+	// FreeFields are only returned by the v2 detail endpoint (GetArticle).
+	// If GetArticle failed and the list summary was used as fallback, freeFields
+	// is nil — do NOT overwrite existing stored freeFields with null.
+	if len(freeFields) > 0 {
+		setFields["freeFields"] = freeFields
+	}
+	// Attributes from ResolvedCharacteristics() (selectedOptions/options in v2 or
+	// characteristics/properties in v1). Only update when non-empty to preserve
+	// any previously synced attributes if the fallback path returns nothing.
+	if len(attrs) > 0 {
+		setFields["attributes"] = attrs
 	}
 	if goodsGroupID != nil {
 		setFields["goodsGroupId"] = goodsGroupID
@@ -1822,10 +1832,27 @@ func (e *Engine) upsertGoodsGroup(ctx context.Context, tenantID primitive.Object
 
 // SyncSingleProduct syncs a single product from Xentral by Xentral ID.
 // Used by the webhook handler for fast incremental updates without a full list scan.
+// In addition to the v2 detail (freeFields, selectedOptions), it also calls
+// /api/v1/products/{id}/properties to pick up Eigenschaften (product-level key-value
+// attributes). This extra call is affordable for a single product but would be too
+// expensive (N+1) for a full bulk sync.
 func (e *Engine) SyncSingleProduct(ctx context.Context, tenantID primitive.ObjectID, client *Client, xentralID string) error {
 	article, err := client.GetArticle(ctx, xentralID)
 	if err != nil {
 		return fmt.Errorf("get article %s: %w", xentralID, err)
+	}
+	// Merge Eigenschaften from the v1 properties endpoint into article.Properties.
+	// ResolvedCharacteristics() picks these up as a v1 fallback when selectedOptions/options
+	// are empty (simple products), or they are appended to the v2 option-derived attrs.
+	if props, propErr := client.GetProductProperties(ctx, xentralID); propErr == nil {
+		for _, p := range props {
+			if p.Name != "" {
+				article.Properties = append(article.Properties, XCharacteristic{
+					Name:  p.Name,
+					Value: p.Value,
+				})
+			}
+		}
 	}
 	return e.upsertProduct(ctx, tenantID, *article)
 }

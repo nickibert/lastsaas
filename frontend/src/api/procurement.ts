@@ -644,3 +644,35 @@ export const stockApi = {
   listLevels: (params?: { productId?: string; nonZero?: boolean; page?: number; limit?: number }) =>
     api.get<PagedResult<StockLevel>>(`${BASE}/stock/levels`, { params }).then(r => r.data),
 };
+
+// Sales Orders (Verkaufsaufträge – synced from Xentral, read-only)
+export interface SalesOrderLineItem {
+  xentralArticleId?: string;
+  productId?: string;
+  description?: string;
+  quantity: number;
+  unitPriceEur: number;
+  totalPriceEur: number;
+}
+
+export interface SalesOrder {
+  id: string;
+  tenantId: string;
+  customerId?: string;
+  xentralDocumentNr?: string;
+  externalOrderNr?: string;
+  date: string;
+  status?: string;
+  lineItems?: SalesOrderLineItem[];
+  totalNetEur?: number;
+  totalGrossEur?: number;
+  currency?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const salesOrdersApi = {
+  list: (q?: string, status?: string, page = 1, limit = 25) =>
+    api.get<PagedResult<SalesOrder>>(`${BASE}/sales-orders`, { params: { q, status, page, limit } }).then(r => r.data),
+  get: (id: string) => api.get<SalesOrder>(`${BASE}/sales-orders/${id}`).then(r => r.data),
+};
