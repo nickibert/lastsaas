@@ -357,7 +357,7 @@ func main() {
 	pmHandler := handlers.NewPMHandler(database, telemetrySvc, sysLogger)
 	eventDefsHandler := handlers.NewEventDefinitionsHandler(database, sysLogger)
 	procurementHandler := handlers.NewProcurementHandler(database, sysLogger)
-	xentral.RunScheduler(appCtx, database)
+	xentral.RunScheduler(appCtx, database, sysLogger)
 	telemetryHandler := handlers.NewTelemetryHandler(telemetrySvc)
 	apiKeysHandler := handlers.NewAPIKeysHandler(database, emitter, sysLogger)
 	webhooksHandler := handlers.NewWebhooksHandler(database, sysLogger, webhookDispatcher)

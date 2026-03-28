@@ -37,7 +37,7 @@ func NewProcurementHandler(database *db.MongoDB, sysLogger *syslog.Logger) *Proc
 		db:       database,
 		syslog:   sysLogger,
 		tenantMW: middleware.NewTenantMiddleware(database),
-		xentral:  xentral.NewEngine(database),
+		xentral:  xentral.NewEngine(database, sysLogger),
 	}
 }
 
@@ -215,6 +215,11 @@ func (h *ProcurementHandler) RegisterRoutes(r *mux.Router, authMW mux.Middleware
 	// Sales orders (Verkaufsaufträge – synced from Xentral; read-only in UI)
 	s.HandleFunc("/sales-orders", h.listSalesOrders).Methods(http.MethodGet)
 	s.HandleFunc("/sales-orders/{id}", h.getSalesOrder).Methods(http.MethodGet)
+
+	// Supplier product configs (Lead Time, MOQ per supplier+product)
+	s.HandleFunc("/supplier-product-configs", h.listSupplierProductConfigs).Methods(http.MethodGet)
+	s.HandleFunc("/supplier-product-configs", h.upsertSupplierProductConfig).Methods(http.MethodPut)
+	s.HandleFunc("/supplier-product-configs/{supplierId}/{productId}", h.deleteSupplierProductConfig).Methods(http.MethodDelete)
 
 	// Xentral ERP integration
 	NewXentralHandler(h.db, h.syslog).RegisterRoutes(s)
@@ -1590,7 +1595,8 @@ func freightCostEUR(f models.OrderFreight, fallbackRate float64) float64 {
 	return frtEUR +
 		seaUSD*rate +
 		f.THCEUR + f.ISPSEUR + f.BLDocFeeEUR + f.FollowUpFeesEUR +
-		f.CustomsClearanceEUR + f.CustomsEUR
+		f.CustomsClearanceEUR + f.CustomsEUR +
+		f.ContainerBookingCostEUR
 }
 
 // applyOrderEK calculates the landed cost (EK) per product per container.
@@ -1835,6 +1841,39 @@ func (h *ProcurementHandler) applyOrderEK(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
+
+	// Auto-push EK prices to Xentral if the tenant has it configured.
+	// Runs async so the HTTP response is not delayed.
+	go func(tID, oID primitive.ObjectID) {
+		pushCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		var xCfg models.XentralConfig
+		if err := h.db.XentralConfigs().FindOne(pushCtx, bson.M{
+			"tenantId": tID, "enabled": true, "pushProductsToXentral": true,
+		}).Decode(&xCfg); err != nil {
+			return // not configured or disabled
+		}
+		cur, err := h.db.ProductPriceLists().Find(pushCtx, bson.M{
+			"tenantId": tID,
+			"orderId":  oID,
+			"source":   "order",
+			"type":     "EK",
+		})
+		if err != nil {
+			return
+		}
+		var prices []models.ProductPriceList
+		_ = cur.All(pushCtx, &prices)
+		client := xentral.NewClient(xCfg.BaseURL, xCfg.APIToken)
+		for _, p := range prices {
+			if _, err := h.xentral.PushPurchasePriceToXentral(pushCtx, tID, p.ID, client); err != nil {
+				h.syslog.Log(pushCtx, "medium", fmt.Sprintf(
+					"auto-push EK to Xentral failed: order=%s product=%s err=%v",
+					oID.Hex(), p.ProductID.Hex(), err,
+				))
+			}
+		}
+	}(tenantID, orderRef)
 }
 
 // ---------------------------------------------------------------------------
@@ -3438,4 +3477,119 @@ func (h *ProcurementHandler) getSalesOrder(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, so)
+}
+
+// ---------------------------------------------------------------------------
+// Supplier Product Configs (Lead Time, MOQ)
+// ---------------------------------------------------------------------------
+
+func (h *ProcurementHandler) listSupplierProductConfigs(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	filter := bson.M{"tenantId": tenantID}
+	if sid := r.URL.Query().Get("supplierId"); sid != "" {
+		if oid, err := primitive.ObjectIDFromHex(sid); err == nil {
+			filter["supplierId"] = oid
+		}
+	}
+	if pid := r.URL.Query().Get("productId"); pid != "" {
+		if oid, err := primitive.ObjectIDFromHex(pid); err == nil {
+			filter["productId"] = oid
+		}
+	}
+	cursor, err := h.db.SupplierProductConfigs().Find(r.Context(), filter,
+		options.Find().SetSort(bson.D{{Key: "updatedAt", Value: -1}}).SetLimit(500),
+	)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	var configs []models.SupplierProductConfig
+	cursor.All(r.Context(), &configs) //nolint
+	if configs == nil {
+		configs = []models.SupplierProductConfig{}
+	}
+	writeJSON(w, http.StatusOK, configs)
+}
+
+func (h *ProcurementHandler) upsertSupplierProductConfig(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		SupplierID   string `json:"supplierId"`
+		ProductID    string `json:"productId"`
+		LeadTimeDays int    `json:"leadTimeDays"`
+		MOQ          int    `json:"moq"`
+		Notes        string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	supplierID, err := primitive.ObjectIDFromHex(req.SupplierID)
+	if err != nil {
+		http.Error(w, "invalid supplierId", http.StatusBadRequest)
+		return
+	}
+	productID, err2 := primitive.ObjectIDFromHex(req.ProductID)
+	if err2 != nil {
+		http.Error(w, "invalid productId", http.StatusBadRequest)
+		return
+	}
+	if req.LeadTimeDays < 0 || req.MOQ < 0 {
+		http.Error(w, "leadTimeDays and moq must be >= 0", http.StatusBadRequest)
+		return
+	}
+	now := time.Now()
+	_, upsertErr := h.db.SupplierProductConfigs().UpdateOne(r.Context(),
+		bson.M{"tenantId": tenantID, "supplierId": supplierID, "productId": productID},
+		bson.M{
+			"$set": bson.M{
+				"leadTimeDays": req.LeadTimeDays,
+				"moq":          req.MOQ,
+				"notes":        req.Notes,
+				"updatedAt":    now,
+			},
+			"$setOnInsert": bson.M{
+				"tenantId":   tenantID,
+				"supplierId": supplierID,
+				"productId":  productID,
+				"createdAt":  now,
+			},
+		},
+		options.Update().SetUpsert(true),
+	)
+	if upsertErr != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *ProcurementHandler) deleteSupplierProductConfig(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := procurementTenantID(r)
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	supplierID, err := primitive.ObjectIDFromHex(mux.Vars(r)["supplierId"])
+	if err != nil {
+		http.Error(w, "invalid supplierId", http.StatusBadRequest)
+		return
+	}
+	productID, err2 := primitive.ObjectIDFromHex(mux.Vars(r)["productId"])
+	if err2 != nil {
+		http.Error(w, "invalid productId", http.StatusBadRequest)
+		return
+	}
+	h.db.SupplierProductConfigs().DeleteOne(r.Context(), bson.M{ //nolint
+		"tenantId": tenantID, "supplierId": supplierID, "productId": productID,
+	})
+	w.WriteHeader(http.StatusNoContent)
 }

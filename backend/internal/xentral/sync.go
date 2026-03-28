@@ -14,6 +14,7 @@ import (
 
 	"lastsaas/internal/db"
 	"lastsaas/internal/models"
+	"lastsaas/internal/syslog"
 )
 
 // Engine executes bidirectional sync between Xentral and LastSaaS.
@@ -27,11 +28,12 @@ import (
 // The XentralMapping collection is used as a join table so that repeated
 // syncs update existing records rather than inserting duplicates.
 type Engine struct {
-	db *db.MongoDB
+	db     *db.MongoDB
+	syslog *syslog.Logger
 }
 
-func NewEngine(database *db.MongoDB) *Engine {
-	return &Engine{db: database}
+func NewEngine(database *db.MongoDB, logger *syslog.Logger) *Engine {
+	return &Engine{db: database, syslog: logger}
 }
 
 // -------------------------------------------------------------------
@@ -102,30 +104,28 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 	}
 
 	if err == mongo.ErrNoDocuments {
-		// Create new product
+		// Create new product + mapping atomically so a crash between the two writes
+		// cannot leave an unmapped orphan product that would be duplicated on next sync.
 		product := models.Product{
-			ID:          primitive.NewObjectID(),
-			TenantID:    tenantID,
-			NameShort:   nameShort,
-			NameLong:    truncate(a.Name, 255),
-			Description: a.Description,
-			EAN:         truncate(a.EAN, 32),
-			WeightKg:    a.ResolvedWeight(),
-			LastEK:      a.ResolvedPurchasePrice(),
-			LastVK:      a.ResolvedSellPrice(),
-			Tags:        tags,
-			Attributes:  attrs,
+			ID:           primitive.NewObjectID(),
+			TenantID:     tenantID,
+			NameShort:    nameShort,
+			NameLong:     truncate(a.Name, 255),
+			Description:  a.Description,
+			EAN:          truncate(a.EAN, 32),
+			WeightKg:     a.ResolvedWeight(),
+			LastEK:       a.ResolvedPurchasePrice(),
+			LastVK:       a.ResolvedSellPrice(),
+			Tags:         tags,
+			Attributes:   attrs,
 			GoodsGroupID: goodsGroupID,
-			XentralNr:   truncate(articleNr, 50),
-			Active:      active,
-			FreeFields:  freeFields,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			XentralNr:    truncate(articleNr, 50),
+			Active:       active,
+			FreeFields:   freeFields,
+			CreatedAt:    now,
+			UpdatedAt:    now,
 		}
-		if _, err := e.db.Products().InsertOne(ctx, product); err != nil {
-			return fmt.Errorf("insert product: %w", err)
-		}
-		_, _ = e.db.XentralMappings().InsertOne(ctx, models.XentralMapping{
+		mapping := models.XentralMapping{
 			ID:        primitive.NewObjectID(),
 			TenantID:  tenantID,
 			Entity:    "product",
@@ -134,7 +134,23 @@ func (e *Engine) upsertProduct(ctx context.Context, tenantID primitive.ObjectID,
 			XentralNr: articleNr,
 			CreatedAt: now,
 			UpdatedAt: now,
+		}
+		txErr := e.db.WithTransaction(ctx, func(sessCtx mongo.SessionContext) error {
+			if _, err := e.db.Products().InsertOne(sessCtx, product); err != nil {
+				return fmt.Errorf("insert product: %w", err)
+			}
+			if _, err := e.db.XentralMappings().InsertOne(sessCtx, mapping); err != nil {
+				return fmt.Errorf("insert mapping: %w", err)
+			}
+			return nil
 		})
+		if txErr != nil {
+			// Standalone MongoDB does not support transactions; fall back to sequential writes.
+			if _, err := e.db.Products().InsertOne(ctx, product); err != nil {
+				return fmt.Errorf("insert product: %w", err)
+			}
+			_, _ = e.db.XentralMappings().InsertOne(ctx, mapping)
+		}
 		return nil
 	}
 	if err != nil {
@@ -265,10 +281,7 @@ func (e *Engine) upsertCustomer(ctx context.Context, tenantID primitive.ObjectID
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
-		if _, err := e.db.Customers().InsertOne(ctx, customer); err != nil {
-			return fmt.Errorf("insert customer: %w", err)
-		}
-		_, _ = e.db.XentralMappings().InsertOne(ctx, models.XentralMapping{
+		cMapping := models.XentralMapping{
 			ID:        primitive.NewObjectID(),
 			TenantID:  tenantID,
 			Entity:    "customer",
@@ -277,7 +290,22 @@ func (e *Engine) upsertCustomer(ctx context.Context, tenantID primitive.ObjectID
 			XentralNr: xc.CustomerNumber,
 			CreatedAt: now,
 			UpdatedAt: now,
+		}
+		txErr := e.db.WithTransaction(ctx, func(sessCtx mongo.SessionContext) error {
+			if _, err := e.db.Customers().InsertOne(sessCtx, customer); err != nil {
+				return fmt.Errorf("insert customer: %w", err)
+			}
+			if _, err := e.db.XentralMappings().InsertOne(sessCtx, cMapping); err != nil {
+				return fmt.Errorf("insert mapping: %w", err)
+			}
+			return nil
 		})
+		if txErr != nil {
+			if _, err := e.db.Customers().InsertOne(ctx, customer); err != nil {
+				return fmt.Errorf("insert customer: %w", err)
+			}
+			_, _ = e.db.XentralMappings().InsertOne(ctx, cMapping)
+		}
 		return nil
 	}
 	if err != nil {
@@ -353,10 +381,7 @@ func (e *Engine) upsertSupplier(ctx context.Context, tenantID primitive.ObjectID
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
-		if _, err := e.db.Suppliers().InsertOne(ctx, supplier); err != nil {
-			return fmt.Errorf("insert supplier: %w", err)
-		}
-		_, _ = e.db.XentralMappings().InsertOne(ctx, models.XentralMapping{
+		sMapping := models.XentralMapping{
 			ID:        primitive.NewObjectID(),
 			TenantID:  tenantID,
 			Entity:    "supplier",
@@ -365,7 +390,22 @@ func (e *Engine) upsertSupplier(ctx context.Context, tenantID primitive.ObjectID
 			XentralNr: xs.SupplierNumber,
 			CreatedAt: now,
 			UpdatedAt: now,
+		}
+		txErr := e.db.WithTransaction(ctx, func(sessCtx mongo.SessionContext) error {
+			if _, err := e.db.Suppliers().InsertOne(sessCtx, supplier); err != nil {
+				return fmt.Errorf("insert supplier: %w", err)
+			}
+			if _, err := e.db.XentralMappings().InsertOne(sessCtx, sMapping); err != nil {
+				return fmt.Errorf("insert mapping: %w", err)
+			}
+			return nil
 		})
+		if txErr != nil {
+			if _, err := e.db.Suppliers().InsertOne(ctx, supplier); err != nil {
+				return fmt.Errorf("insert supplier: %w", err)
+			}
+			_, _ = e.db.XentralMappings().InsertOne(ctx, sMapping)
+		}
 		return nil
 	}
 	if err != nil {
@@ -1158,130 +1198,105 @@ func (e *Engine) resolveCustomerID(ctx context.Context, tenantID primitive.Objec
 
 // RunScheduler starts a background goroutine that triggers auto-sync
 // for all enabled tenants according to their configured SyncIntervalH.
-// Call once from main; returns a stop function.
-func RunScheduler(ctx context.Context, database *db.MongoDB) {
+// The ticker fires every 5 minutes so scheduled syncs are accurate to within ±5 minutes.
+// Call once from main.
+func RunScheduler(ctx context.Context, database *db.MongoDB, logger *syslog.Logger) {
 	go func() {
-		ticker := time.NewTicker(30 * time.Minute)
+		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				runScheduledSyncs(ctx, database)
+				runScheduledSyncs(ctx, database, logger)
 			}
 		}
 	}()
 }
 
-func runScheduledSyncs(ctx context.Context, database *db.MongoDB) {
+func runScheduledSyncs(ctx context.Context, database *db.MongoDB, logger *syslog.Logger) {
 	cursor, err := database.XentralConfigs().Find(ctx, bson.M{
 		"enabled":       true,
 		"syncIntervalH": bson.M{"$gt": 0},
-	}, options.Find().SetProjection(bson.M{
-		"tenantId": 1, "baseUrl": 1, "apiToken": 1,
-		"syncIntervalH": 1,
-		"syncProducts": 1, "syncCustomers": 1, "syncSuppliers": 1, "syncOrders": 1,
-		"syncSalesOrders": 1, "syncPurchasePrices": 1, "syncSalesPrices": 1,
-		"pushOrdersToXentral": 1,
-		"lastSyncProducts": 1, "lastSyncCustomers": 1, "lastSyncSuppliers": 1, "lastSyncOrders": 1,
-		"lastSyncSalesOrders": 1, "lastSyncPurchasePrices": 1, "lastSyncSalesPrices": 1,
-		"lastPushOrders": 1,
-	}))
+	})
 	if err != nil {
 		return
 	}
 	var configs []models.XentralConfig
 	cursor.All(ctx, &configs) //nolint
 
-	engine := NewEngine(database)
+	engine := NewEngine(database, logger)
 	now := time.Now()
 
 	for _, cfg := range configs {
 		client := NewClient(cfg.BaseURL, cfg.APIToken)
 		interval := time.Duration(cfg.SyncIntervalH) * time.Hour
 
-		if cfg.SyncProducts && isDue(cfg.LastSyncProducts, now, interval) {
-			engine.SyncProducts(ctx, cfg.TenantID, client) //nolint
-			t := now
-			database.XentralConfigs().UpdateOne(ctx, //nolint
-				bson.M{"tenantId": cfg.TenantID},
-				bson.M{"$set": bson.M{"lastSyncProducts": t}},
-			)
+		type entityRun struct {
+			entity  string
+			enabled bool
+			run     func()
 		}
-		if cfg.SyncCustomers && isDue(cfg.LastSyncCustomers, now, interval) {
-			engine.SyncCustomers(ctx, cfg.TenantID, client) //nolint
-			t := now
-			database.XentralConfigs().UpdateOne(ctx, //nolint
-				bson.M{"tenantId": cfg.TenantID},
-				bson.M{"$set": bson.M{"lastSyncCustomers": t}},
-			)
+		runs := []entityRun{
+			{"products", cfg.SyncProducts, func() { engine.SyncProducts(ctx, cfg.TenantID, client) }},            //nolint
+			{"customers", cfg.SyncCustomers, func() { engine.SyncCustomers(ctx, cfg.TenantID, client) }},         //nolint
+			{"suppliers", cfg.SyncSuppliers, func() { engine.SyncSuppliers(ctx, cfg.TenantID, client) }},         //nolint
+			{"orders", cfg.SyncOrders, func() { engine.SyncOrders(ctx, cfg.TenantID, client) }},                  //nolint
+			{"sales_orders", cfg.SyncSalesOrders, func() { engine.SyncSalesOrders(ctx, cfg.TenantID, client) }},  //nolint
+			{"purchase_prices", cfg.SyncPurchasePrices, func() { engine.SyncPurchasePrices(ctx, cfg.TenantID, client) }}, //nolint
+			{"sales_prices", cfg.SyncSalesPrices, func() { engine.SyncSalesPrices(ctx, cfg.TenantID, client) }},  //nolint
+			{"push_orders", cfg.PushOrdersToXentral, func() { engine.PushAllOrdersToXentral(ctx, cfg.TenantID, client) }}, //nolint
+			{"warehouses", cfg.SyncWarehouses, func() { engine.SyncWarehouses(ctx, cfg.TenantID, client) }},      //nolint
+			{"stocks", cfg.SyncStocks, func() { engine.SyncStocksPerProduct(ctx, cfg.TenantID, client) }},        //nolint
 		}
-		if cfg.SyncSuppliers && isDue(cfg.LastSyncSuppliers, now, interval) {
-			engine.SyncSuppliers(ctx, cfg.TenantID, client) //nolint
-			t := now
-			database.XentralConfigs().UpdateOne(ctx, //nolint
-				bson.M{"tenantId": cfg.TenantID},
-				bson.M{"$set": bson.M{"lastSyncSuppliers": t}},
-			)
-		}
-		if cfg.SyncOrders && isDue(cfg.LastSyncOrders, now, interval) {
-			engine.SyncOrders(ctx, cfg.TenantID, client) //nolint
-			t := now
-			database.XentralConfigs().UpdateOne(ctx, //nolint
-				bson.M{"tenantId": cfg.TenantID},
-				bson.M{"$set": bson.M{"lastSyncOrders": t}},
-			)
-		}
-		if cfg.SyncSalesOrders && isDue(cfg.LastSyncSalesOrders, now, interval) {
-			engine.SyncSalesOrders(ctx, cfg.TenantID, client) //nolint
-			t := now
-			database.XentralConfigs().UpdateOne(ctx, //nolint
-				bson.M{"tenantId": cfg.TenantID},
-				bson.M{"$set": bson.M{"lastSyncSalesOrders": t}},
-			)
-		}
-		if cfg.SyncPurchasePrices && isDue(cfg.LastSyncPurchasePrices, now, interval) {
-			engine.SyncPurchasePrices(ctx, cfg.TenantID, client) //nolint
-			t := now
-			database.XentralConfigs().UpdateOne(ctx, //nolint
-				bson.M{"tenantId": cfg.TenantID},
-				bson.M{"$set": bson.M{"lastSyncPurchasePrices": t}},
-			)
-		}
-		if cfg.SyncSalesPrices && isDue(cfg.LastSyncSalesPrices, now, interval) {
-			engine.SyncSalesPrices(ctx, cfg.TenantID, client) //nolint
-			t := now
-			database.XentralConfigs().UpdateOne(ctx, //nolint
-				bson.M{"tenantId": cfg.TenantID},
-				bson.M{"$set": bson.M{"lastSyncSalesPrices": t}},
-			)
-		}
-		if cfg.PushOrdersToXentral && isDue(cfg.LastPushOrders, now, interval) {
-			engine.PushAllOrdersToXentral(ctx, cfg.TenantID, client) //nolint
-			t := now
-			database.XentralConfigs().UpdateOne(ctx, //nolint
-				bson.M{"tenantId": cfg.TenantID},
-				bson.M{"$set": bson.M{"lastPushOrders": t}},
-			)
-		}
-		if cfg.SyncWarehouses && isDue(cfg.LastSyncWarehouses, now, interval) {
-			engine.SyncWarehouses(ctx, cfg.TenantID, client) //nolint
-			t := now
-			database.XentralConfigs().UpdateOne(ctx, //nolint
-				bson.M{"tenantId": cfg.TenantID},
-				bson.M{"$set": bson.M{"lastSyncWarehouses": t}},
-			)
-		}
-		if cfg.SyncStocks && isDue(cfg.LastSyncStocks, now, interval) {
-			engine.SyncStocks(ctx, cfg.TenantID, client) //nolint
-			t := now
-			database.XentralConfigs().UpdateOne(ctx, //nolint
-				bson.M{"tenantId": cfg.TenantID},
-				bson.M{"$set": bson.M{"lastSyncStocks": t}},
-			)
+
+		for _, r := range runs {
+			if !r.enabled {
+				continue
+			}
+			if !isScheduleDue(ctx, database, cfg.TenantID, r.entity, now) {
+				continue
+			}
+			r.run()
+			advanceSchedule(ctx, database, cfg.TenantID, r.entity, now, interval)
 		}
 	}
+}
+
+// isScheduleDue returns true if the (tenantID, entity) pair has no schedule record yet,
+// or if the existing NextRunAt is in the past.
+func isScheduleDue(ctx context.Context, database *db.MongoDB, tenantID primitive.ObjectID, entity string, now time.Time) bool {
+	var sched models.XentralSyncSchedule
+	err := database.XentralSyncSchedule().FindOne(ctx, bson.M{
+		"tenantId": tenantID,
+		"entity":   entity,
+	}).Decode(&sched)
+	if err != nil {
+		// No record yet → treat as due immediately.
+		return true
+	}
+	return !now.Before(sched.NextRunAt)
+}
+
+// advanceSchedule upserts the schedule record: sets LastRunAt = now, NextRunAt = now + interval.
+func advanceSchedule(ctx context.Context, database *db.MongoDB, tenantID primitive.ObjectID, entity string, now time.Time, interval time.Duration) {
+	nextRun := now.Add(interval)
+	database.XentralSyncSchedule().UpdateOne(ctx, //nolint
+		bson.M{"tenantId": tenantID, "entity": entity},
+		bson.M{
+			"$set": bson.M{
+				"lastRunAt": now,
+				"nextRunAt": nextRun,
+				"updatedAt": now,
+			},
+			"$setOnInsert": bson.M{
+				"tenantId": tenantID,
+				"entity":   entity,
+			},
+		},
+		options.Update().SetUpsert(true),
+	)
 }
 
 // -------------------------------------------------------------------
@@ -1595,13 +1610,6 @@ func (e *Engine) upsertStockFromSummary(
 	return err
 }
 
-func isDue(last *time.Time, now time.Time, interval time.Duration) bool {
-	if last == nil {
-		return true
-	}
-	return now.Sub(*last) >= interval
-}
-
 // -------------------------------------------------------------------
 // Helpers
 // -------------------------------------------------------------------
@@ -1669,6 +1677,13 @@ func (e *Engine) finishLog(ctx context.Context, log models.XentralSyncLog) model
 			"finishedAt": log.FinishedAt,
 		}},
 	)
+	// Report partial/error syncs to the system log so they appear in the admin dashboard.
+	if e.syslog != nil && len(log.Errors) > 0 {
+		e.syslog.Log(writeCtx, "medium", fmt.Sprintf(
+			"xentral sync %s tenant=%s: %d errors, %d ok — first: %s",
+			log.Entity, log.TenantID.Hex(), len(log.Errors), log.Updated, log.Errors[0],
+		))
+	}
 	_ = ctx // context was used for the sync work; log write uses its own context above
 	return log
 }
@@ -1897,11 +1912,12 @@ func (e *Engine) SyncSinglePurchaseOrder(ctx context.Context, tenantID primitive
 // Bestellvorschläge – Purchase order suggestions engine
 // -------------------------------------------------------------------
 
-// GeneratePurchaseSuggestions analyses sales history (synced SalesOrder line items)
-// and current stock to produce per-product purchase recommendations.
+// GeneratePurchaseSuggestions analyses sales history (synced SalesOrder line items),
+// current stock, and in-transit deliveries to produce per-product purchase recommendations.
 //
-// analysisDays: how many days of past sales to consider (e.g. 90)
-// targetDays:   desired days of stock coverage after reorder (e.g. 60)
+// analysisDays: how many days of past sales to consider (default 90)
+// targetDays:   desired days of stock coverage after reorder (default 60)
+// defaultLeadTimeDays: fallback lead time if no SupplierProductConfig exists (default 30)
 //
 // Results are stored in the purchase_suggestions collection (one row per product,
 // overwriting the previous open suggestion so the list stays clean).
@@ -1912,6 +1928,7 @@ func (e *Engine) GeneratePurchaseSuggestions(ctx context.Context, tenantID primi
 	if targetDays <= 0 {
 		targetDays = 60
 	}
+	const defaultLeadTimeDays = 30
 
 	cutoff := time.Now().AddDate(0, 0, -analysisDays)
 
@@ -1943,12 +1960,12 @@ func (e *Engine) GeneratePurchaseSuggestions(ctx context.Context, tenantID primi
 		return nil, nil
 	}
 
-	// 2. Build a map of productID → current stock from StockLevels.
 	productIDs := make([]primitive.ObjectID, 0, len(rows))
 	for _, r := range rows {
 		productIDs = append(productIDs, r.ProductID)
 	}
 
+	// 2. Current stock per product (aggregate StockLevels).
 	stockPipeline := mongo.Pipeline{
 		{{Key: "$match", Value: bson.M{"tenantId": tenantID, "productId": bson.M{"$in": productIDs}}}},
 		{{Key: "$group", Value: bson.M{
@@ -1968,24 +1985,105 @@ func (e *Engine) GeneratePurchaseSuggestions(ctx context.Context, tenantID primi
 	}
 	var stockRows []stockRow
 	_ = stockCursor.All(ctx, &stockRows)
-
 	stockMap := make(map[primitive.ObjectID]float64, len(stockRows))
 	for _, s := range stockRows {
 		stockMap[s.ProductID] = s.Total
 	}
 
-	// 3. Look up default supplier per product.
-	supplierMap := make(map[primitive.ObjectID]*primitive.ObjectID, len(rows))
-	for _, r := range rows {
-		var p struct {
-			SupplierID *primitive.ObjectID `bson:"supplierId"`
+	// 3. In-transit stock: open purchase orders (ordered/shipped, not yet arrived).
+	// Sum quantities per product across open orders.
+	transitPipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{
+			"tenantId":       tenantID,
+			"deliveryStatus": bson.M{"$in": bson.A{"ordered", "shipped"}},
+		}}},
+		{{Key: "$unwind", Value: "$products"}},
+		{{Key: "$match", Value: bson.M{"products.productId": bson.M{"$in": productIDs}}}},
+		{{Key: "$group", Value: bson.M{
+			"_id":   "$products.productId",
+			"total": bson.M{"$sum": "$products.quantity"},
+		}}},
+	}
+	transitCursor, err := e.db.Orders().Aggregate(ctx, transitPipeline)
+	if err == nil {
+		defer transitCursor.Close(ctx)
+		type transitRow struct {
+			ProductID primitive.ObjectID `bson:"_id"`
+			Total     float64            `bson:"total"`
 		}
-		if err := e.db.Products().FindOne(ctx, bson.M{"_id": r.ProductID}).Decode(&p); err == nil {
-			supplierMap[r.ProductID] = p.SupplierID
+		var transitRows []transitRow
+		_ = transitCursor.All(ctx, &transitRows)
+		for _, t := range transitRows {
+			stockMap[t.ProductID] += t.Total // in-transit added to stock map temporarily
+		}
+		// Rebuild separate in-transit map
+		transitMap := make(map[primitive.ObjectID]float64, len(transitRows))
+		for _, t := range transitRows {
+			transitMap[t.ProductID] = t.Total
+			stockMap[t.ProductID] -= t.Total // restore original stockMap
+		}
+		// Store for use below
+		_ = transitMap // captured in closure below via re-query
+	}
+
+	// Re-aggregate in-transit separately to keep stockMap clean.
+	inTransitMap := make(map[primitive.ObjectID]float64)
+	tCur2, err2 := e.db.Orders().Aggregate(ctx, transitPipeline)
+	if err2 == nil {
+		defer tCur2.Close(ctx)
+		type transitRow2 struct {
+			ProductID primitive.ObjectID `bson:"_id"`
+			Total     float64            `bson:"total"`
+		}
+		var t2 []transitRow2
+		_ = tCur2.All(ctx, &t2)
+		for _, t := range t2 {
+			inTransitMap[t.ProductID] = t.Total
 		}
 	}
 
-	// 4. Build suggestions.
+	// 4. Look up supplier and SupplierProductConfig in a single batch.
+	type productInfo struct {
+		SupplierID *primitive.ObjectID `bson:"supplierId"`
+	}
+	productInfoMap := make(map[primitive.ObjectID]productInfo, len(rows))
+	prodCursor, err := e.db.Products().Find(ctx, bson.M{"_id": bson.M{"$in": productIDs}, "tenantId": tenantID})
+	if err == nil {
+		defer prodCursor.Close(ctx)
+		type prodRow struct {
+			ID         primitive.ObjectID  `bson:"_id"`
+			SupplierID *primitive.ObjectID `bson:"supplierId"`
+		}
+		for prodCursor.Next(ctx) {
+			var p prodRow
+			if prodCursor.Decode(&p) == nil {
+				productInfoMap[p.ID] = productInfo{SupplierID: p.SupplierID}
+			}
+		}
+	}
+
+	// Load SupplierProductConfigs for all relevant products.
+	spcCursor, err := e.db.SupplierProductConfigs().Find(ctx, bson.M{
+		"tenantId":  tenantID,
+		"productId": bson.M{"$in": productIDs},
+	})
+	type spcKey struct{ sup, prod string }
+	spcMap := make(map[primitive.ObjectID]models.SupplierProductConfig) // keyed by productID
+	if err == nil {
+		defer spcCursor.Close(ctx)
+		for spcCursor.Next(ctx) {
+			var spc models.SupplierProductConfig
+			if spcCursor.Decode(&spc) == nil {
+				// Use the first config found per product (usually one per default supplier)
+				if _, exists := spcMap[spc.ProductID]; !exists {
+					spcMap[spc.ProductID] = spc
+				}
+			}
+		}
+	}
+	_ = spcKey{}
+
+	// 5. Build suggestions.
 	now := time.Now()
 	var suggestions []models.PurchaseSuggestion
 
@@ -1998,31 +2096,73 @@ func (e *Engine) GeneratePurchaseSuggestions(ctx context.Context, tenantID primi
 		if currentStock < 0 {
 			currentStock = 0
 		}
-		daysOfStock := currentStock / avgDaily
-		if daysOfStock >= float64(targetDays) {
-			continue // stock sufficient, skip
+		inTransit := inTransitMap[r.ProductID]
+
+		// Effective stock includes in-transit goods.
+		effectiveStock := currentStock + inTransit
+
+		// Lead time and MOQ from supplier config, fallback to defaults.
+		leadTimeDays := defaultLeadTimeDays
+		moq := 0
+		if spc, ok := spcMap[r.ProductID]; ok {
+			if spc.LeadTimeDays > 0 {
+				leadTimeDays = spc.LeadTimeDays
+			}
+			moq = spc.MOQ
 		}
-		suggestedQty := int(math.Ceil((float64(targetDays)-daysOfStock) * avgDaily))
-		if suggestedQty <= 0 {
+
+		// Days until stock-out based on effective stock.
+		daysOfStock := effectiveStock / avgDaily
+
+		// Only suggest if we will stock out before targetDays + lead time are covered.
+		if daysOfStock >= float64(targetDays+leadTimeDays) {
 			continue
 		}
 
+		// Units needed to reach targetDays + leadTimeDays coverage.
+		neededUnits := math.Ceil((float64(targetDays+leadTimeDays) - daysOfStock) * avgDaily)
+		suggestedQty := int(neededUnits)
+		if suggestedQty <= 0 {
+			continue
+		}
+		// Apply MOQ.
+		if moq > 0 && suggestedQty < moq {
+			suggestedQty = moq
+		}
+
+		// Urgency level.
+		urgency := "low"
+		switch {
+		case daysOfStock < float64(leadTimeDays):
+			urgency = "critical" // will stock out before next order arrives
+		case daysOfStock < float64(leadTimeDays+7):
+			urgency = "high"
+		case daysOfStock < float64(targetDays):
+			urgency = "medium"
+		}
+
+		info := productInfoMap[r.ProductID]
 		sugg := models.PurchaseSuggestion{
-			ID:            primitive.NewObjectID(),
-			TenantID:      tenantID,
-			ProductID:     r.ProductID,
-			SupplierID:    supplierMap[r.ProductID],
-			AnalysisDays:  analysisDays,
-			UnitsSold:     r.UnitsSold,
-			AvgDailySales: avgDaily,
-			CurrentStock:  currentStock,
-			DaysOfStock:   daysOfStock,
-			SuggestedQty:  suggestedQty,
-			TargetDays:    targetDays,
-			Status:        "open",
-			GeneratedAt:   now,
-			CreatedAt:     now,
-			UpdatedAt:     now,
+			ID:             primitive.NewObjectID(),
+			TenantID:       tenantID,
+			ProductID:      r.ProductID,
+			SupplierID:     info.SupplierID,
+			AnalysisDays:   analysisDays,
+			UnitsSold:      r.UnitsSold,
+			AvgDailySales:  avgDaily,
+			CurrentStock:   currentStock,
+			InTransitQty:   inTransit,
+			EffectiveStock: effectiveStock,
+			DaysOfStock:    daysOfStock,
+			LeadTimeDays:   leadTimeDays,
+			MOQ:            moq,
+			SuggestedQty:   suggestedQty,
+			TargetDays:     targetDays,
+			UrgencyLevel:   urgency,
+			Status:         "open",
+			GeneratedAt:    now,
+			CreatedAt:      now,
+			UpdatedAt:      now,
 		}
 		suggestions = append(suggestions, sugg)
 
@@ -2031,16 +2171,21 @@ func (e *Engine) GeneratePurchaseSuggestions(ctx context.Context, tenantID primi
 			bson.M{"tenantId": tenantID, "productId": r.ProductID, "status": "open"},
 			bson.M{
 				"$set": bson.M{
-					"supplierId":    sugg.SupplierID,
-					"analysisDays":  analysisDays,
-					"unitsSold":     r.UnitsSold,
-					"avgDailySales": avgDaily,
-					"currentStock":  currentStock,
-					"daysOfStock":   daysOfStock,
-					"suggestedQty":  suggestedQty,
-					"targetDays":    targetDays,
-					"generatedAt":   now,
-					"updatedAt":     now,
+					"supplierId":     sugg.SupplierID,
+					"analysisDays":   analysisDays,
+					"unitsSold":      r.UnitsSold,
+					"avgDailySales":  avgDaily,
+					"currentStock":   currentStock,
+					"inTransitQty":   inTransit,
+					"effectiveStock": effectiveStock,
+					"daysOfStock":    daysOfStock,
+					"leadTimeDays":   leadTimeDays,
+					"moq":            moq,
+					"suggestedQty":   suggestedQty,
+					"targetDays":     targetDays,
+					"urgencyLevel":   urgency,
+					"generatedAt":    now,
+					"updatedAt":      now,
 				},
 				"$setOnInsert": bson.M{
 					"_id":       sugg.ID,

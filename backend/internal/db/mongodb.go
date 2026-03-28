@@ -354,6 +354,29 @@ func (m *MongoDB) ensureIndexes() {
 				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "fieldIndex", Value: 1}}, Options: options.Index().SetUnique(true)},
 			},
 		},
+		{
+			"xentral_sync_schedule",
+			[]mongo.IndexModel{
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "entity", Value: 1}}, Options: options.Index().SetUnique(true)},
+				{Keys: bson.D{{Key: "nextRunAt", Value: 1}}}, // efficient scheduler poll
+			},
+		},
+		{
+			// Webhook deduplication: unique eventKey prevents double-processing Xentral retries.
+			// expiresAt TTL auto-deletes records after 24h.
+			"xentral_webhook_events",
+			[]mongo.IndexModel{
+				{Keys: bson.D{{Key: "eventKey", Value: 1}}, Options: options.Index().SetUnique(true)},
+				{Keys: bson.D{{Key: "expiresAt", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
+			},
+		},
+		{
+			"supplier_product_configs",
+			[]mongo.IndexModel{
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "supplierId", Value: 1}, {Key: "productId", Value: 1}}, Options: options.Index().SetUnique(true)},
+				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "productId", Value: 1}}},
+			},
+		},
 	}
 
 	// Collections where unique index failure is a data integrity risk
@@ -379,6 +402,21 @@ func (m *MongoDB) ensureIndexes() {
 
 func (m *MongoDB) Close(ctx context.Context) error {
 	return m.Client.Disconnect(ctx)
+}
+
+// WithTransaction executes fn inside a MongoDB multi-document transaction.
+// Requires a replica set or Atlas cluster; returns an error on standalone deployments.
+// On error, the transaction is automatically aborted.
+func (m *MongoDB) WithTransaction(ctx context.Context, fn func(sessCtx mongo.SessionContext) error) error {
+	session, err := m.Client.StartSession()
+	if err != nil {
+		return fmt.Errorf("start session: %w", err)
+	}
+	defer session.EndSession(ctx)
+	_, err = session.WithTransaction(ctx, func(sessCtx mongo.SessionContext) (interface{}, error) {
+		return nil, fn(sessCtx)
+	})
+	return err
 }
 
 func (m *MongoDB) Users() *mongo.Collection {
@@ -651,4 +689,16 @@ func (m *MongoDB) ProductFreefieldDefs() *mongo.Collection {
 
 func (m *MongoDB) PurchaseSuggestions() *mongo.Collection {
 	return m.Database.Collection("purchase_suggestions")
+}
+
+func (m *MongoDB) XentralWebhookEvents() *mongo.Collection {
+	return m.Database.Collection("xentral_webhook_events")
+}
+
+func (m *MongoDB) XentralSyncSchedule() *mongo.Collection {
+	return m.Database.Collection("xentral_sync_schedule")
+}
+
+func (m *MongoDB) SupplierProductConfigs() *mongo.Collection {
+	return m.Database.Collection("supplier_product_configs")
 }

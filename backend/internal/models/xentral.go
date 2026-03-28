@@ -97,6 +97,31 @@ type XentralMapping struct {
 	UpdatedAt time.Time          `json:"updatedAt" bson:"updatedAt"`
 }
 
+// XentralWebhookEvent is written once per incoming Xentral webhook delivery.
+// The unique index on EventKey prevents the same delivery from being processed
+// twice when Xentral retries (e.g. after a timeout). The TTL index on ExpiresAt
+// automatically removes records after 24 hours.
+type XentralWebhookEvent struct {
+	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	TenantID    primitive.ObjectID `json:"tenantId" bson:"tenantId"`
+	EventKey    string             `json:"eventKey" bson:"eventKey"`     // "{token}:{event}:{resourceId}"
+	ProcessedAt time.Time          `json:"processedAt" bson:"processedAt"`
+	ExpiresAt   time.Time          `json:"expiresAt" bson:"expiresAt"`   // TTL field — auto-deleted after 24h
+}
+
+// XentralSyncSchedule persists the next scheduled run time per (tenant, entity).
+// The scheduler reads documents where NextRunAt <= now and updates them after each run.
+// This survives process restarts and gives per-entity scheduling accuracy to ±5 minutes
+// (the ticker interval in RunScheduler).
+type XentralSyncSchedule struct {
+	ID        primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	TenantID  primitive.ObjectID `json:"tenantId" bson:"tenantId"`
+	Entity    string             `json:"entity" bson:"entity"`           // e.g. "products", "customers"
+	NextRunAt time.Time          `json:"nextRunAt" bson:"nextRunAt"`     // run when now >= NextRunAt
+	LastRunAt *time.Time         `json:"lastRunAt,omitempty" bson:"lastRunAt,omitempty"`
+	UpdatedAt time.Time          `json:"updatedAt" bson:"updatedAt"`
+}
+
 // XentralSyncLog records the result of one sync run for one entity type.
 type XentralSyncLog struct {
 	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`

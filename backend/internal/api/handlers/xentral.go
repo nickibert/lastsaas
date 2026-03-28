@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -33,7 +34,7 @@ func NewXentralHandler(database *db.MongoDB, logger *syslog.Logger) *XentralHand
 	return &XentralHandler{
 		db:     database,
 		syslog: logger,
-		engine: xentral.NewEngine(database),
+		engine: xentral.NewEngine(database, logger),
 	}
 }
 
@@ -575,10 +576,13 @@ func (h *XentralHandler) runSync(ctx context.Context, tenantID primitive.ObjectI
 		log = h.engine.SyncWarehouses(ctx, tenantID, client)
 		h.db.XentralConfigs().UpdateOne(ctx, bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncWarehouses": now}}) //nolint
 	case "stocks":
+		// Route "stocks" to the official endpoint (SyncStocksPerProduct).
+		// The undocumented SyncStocks (/api/v1/stocks) is no longer used in scheduled/manual flows
+		// to avoid accumulating duplicate rows with incompatible xentralId key formats.
 		if !cfg.SyncStocks {
 			return skippedLog(tenantID, entity)
 		}
-		log = h.engine.SyncStocks(ctx, tenantID, client)
+		log = h.engine.SyncStocksPerProduct(ctx, tenantID, client)
 		h.db.XentralConfigs().UpdateOne(ctx, bson.M{"tenantId": tenantID}, bson.M{"$set": bson.M{"lastSyncStocks": now}}) //nolint
 	case "stocks_per_product":
 		// Uses the official /api/products/:id/stocks (v1-beta) endpoint.
@@ -646,6 +650,23 @@ func (h *XentralHandler) receiveWebhook(w http.ResponseWriter, r *http.Request) 
 	tenantID := cfg.TenantID
 	resourceID := payload.ResourceID
 
+	// Deduplication: reject events that have already been processed within the last 24h.
+	// Xentral retries webhooks on timeout/error; the unique index on eventKey ensures
+	// each delivery is processed exactly once.
+	eventKey := fmt.Sprintf("%s:%s:%s", token, payload.Event, resourceID)
+	now := time.Now()
+	_, dedupErr := h.db.XentralWebhookEvents().InsertOne(r.Context(), models.XentralWebhookEvent{
+		TenantID:    tenantID,
+		EventKey:    eventKey,
+		ProcessedAt: now,
+		ExpiresAt:   now.Add(24 * time.Hour),
+	})
+	if dedupErr != nil {
+		// Duplicate key error = already processed. Acknowledge silently.
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	// Targeted incremental sync: use resourceId when present to sync only the changed
 	// entity. If resourceId is missing fall back to a full entity list sync.
 	// Run in a goroutine so the HTTP response is returned immediately (Xentral expects
@@ -653,43 +674,65 @@ func (h *XentralHandler) receiveWebhook(w http.ResponseWriter, r *http.Request) 
 	go func() {
 		wCtx, wCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer wCancel()
+
+		// SyncSingle* returns error; full-list syncs return XentralSyncLog.
+		// We track the worst outcome to log it after the switch.
+		var syncErr error
+		var syncLog models.XentralSyncLog
+
 		switch {
 		case isEventType(payload.Event, "product"):
 			if resourceID != "" {
-				h.engine.SyncSingleProduct(wCtx, tenantID, client, resourceID) //nolint
+				syncErr = h.engine.SyncSingleProduct(wCtx, tenantID, client, resourceID)
 			} else {
-				h.engine.SyncProducts(wCtx, tenantID, client) //nolint
+				syncLog = h.engine.SyncProducts(wCtx, tenantID, client)
 			}
 		case isEventType(payload.Event, "customer"):
 			if resourceID != "" {
-				h.engine.SyncSingleCustomer(wCtx, tenantID, client, resourceID) //nolint
+				syncErr = h.engine.SyncSingleCustomer(wCtx, tenantID, client, resourceID)
 			} else {
-				h.engine.SyncCustomers(wCtx, tenantID, client) //nolint
+				syncLog = h.engine.SyncCustomers(wCtx, tenantID, client)
 			}
 		case isEventType(payload.Event, "supplier"):
 			if resourceID != "" {
-				h.engine.SyncSingleSupplier(wCtx, tenantID, client, resourceID) //nolint
+				syncErr = h.engine.SyncSingleSupplier(wCtx, tenantID, client, resourceID)
 			} else {
-				h.engine.SyncSuppliers(wCtx, tenantID, client) //nolint
+				syncLog = h.engine.SyncSuppliers(wCtx, tenantID, client)
 			}
 		case isEventType(payload.Event, "purchaseOrder"):
 			if resourceID != "" {
-				h.engine.SyncSinglePurchaseOrder(wCtx, tenantID, client, resourceID) //nolint
+				syncErr = h.engine.SyncSinglePurchaseOrder(wCtx, tenantID, client, resourceID)
 			} else {
-				h.engine.SyncOrders(wCtx, tenantID, client) //nolint
+				syncLog = h.engine.SyncOrders(wCtx, tenantID, client)
 			}
 		case isEventType(payload.Event, "salesOrder"):
 			if resourceID != "" {
-				h.engine.SyncSingleSalesOrder(wCtx, tenantID, client, resourceID) //nolint
+				syncErr = h.engine.SyncSingleSalesOrder(wCtx, tenantID, client, resourceID)
 			} else {
-				h.engine.SyncSalesOrders(wCtx, tenantID, client) //nolint
+				syncLog = h.engine.SyncSalesOrders(wCtx, tenantID, client)
 			}
 		case isEventType(payload.Event, "purchasePrice"):
-			h.engine.SyncPurchasePrices(wCtx, tenantID, client) //nolint
+			syncLog = h.engine.SyncPurchasePrices(wCtx, tenantID, client)
 		case isEventType(payload.Event, "salesPrice"):
-			h.engine.SyncSalesPrices(wCtx, tenantID, client) //nolint
+			syncLog = h.engine.SyncSalesPrices(wCtx, tenantID, client)
 		case isEventType(payload.Event, "merchandiseGroup"):
-			h.engine.SyncMerchandiseGroups(wCtx, tenantID, client) //nolint
+			syncLog = h.engine.SyncMerchandiseGroups(wCtx, tenantID, client)
+		}
+
+		if syncErr != nil {
+			h.syslog.Log(wCtx, "high", fmt.Sprintf(
+				"xentral webhook sync failed: event=%s resource=%s err=%v",
+				payload.Event, resourceID, syncErr,
+			))
+		} else if syncLog.Status == "error" {
+			errMsg := ""
+			if len(syncLog.Errors) > 0 {
+				errMsg = syncLog.Errors[0]
+			}
+			h.syslog.Log(wCtx, "high", fmt.Sprintf(
+				"xentral webhook sync failed: event=%s err=%s",
+				payload.Event, errMsg,
+			))
 		}
 	}()
 
